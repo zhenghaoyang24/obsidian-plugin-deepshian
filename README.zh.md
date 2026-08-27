@@ -1,5 +1,7 @@
 # DeepShian
 
+<img width="1858" height="1014" alt="image" src="https://github.com/user-attachments/assets/928c02f6-25c5-487b-a105-0cf65391ebfc" />
+
 [English](README.md) | 简体中文
 
 > Obsidian 侧边栏 AI —— 本地 DeepSeek Harness 驱动
