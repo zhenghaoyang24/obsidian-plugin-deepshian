@@ -1,0 +1,61 @@
+name: Release Obsidian plugin
+
+on:
+  push:
+    tags:
+      - "*" # Any tag, e.g. 1.0.0 — see the tag-version guard below
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22" # keep in sync with engines/@types/node
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build plugin
+        run: npm run build # typecheck + bundle to build/ (main.js, manifest.json, styles.css)
+
+      # Obsidian only accepts x.y.z tags that exactly match the version in
+      # manifest.json — no "v" prefix. Fail loudly instead of shipping a
+      # release Obsidian's updater can never find.
+      - name: Check tag matches manifest.json version
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          manifest_version="$(node -p "require('./manifest.json').version")"
+          if [ "${tag}" != "${manifest_version}" ]; then
+            echo "::error::Tag '${tag}' does not match manifest.json version '${manifest_version}'. Obsidian only accepts tags in x.y.z format that exactly match the manifest version (no 'v' prefix). Bump manifest.json and tag the new version."
+            exit 1
+          fi
+
+      - name: Attest build provenance
+        uses: actions/attest@v1
+        with:
+          subject-path: |
+            build/main.js
+            build/manifest.json
+            build/styles.css
+
+      - name: Create release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+
+          # Draft release: assets attached, then edit + add notes + publish in
+          # the GitHub UI (same flow as the official Obsidian sample plugin).
+          gh release create "$tag" \
+            --title="$tag" \
+            --draft \
+            build/main.js build/manifest.json build/styles.css

@@ -1,0 +1,1253 @@
+/* DeepSidian sidebar — visual language ported from the dsh web conversation UI
+ * (packages/client/ui-conversation): rounded composer card with an overflow
+ * wrapper (the textarea itself never scrolls), right-aligned user bubbles,
+ * disclosure rows for Think / tool calls with a running sweep animation, dsh
+ * permission glyphs for the access-mode select at the card's bottom-left, and
+ * a circular primary send button.
+ *
+ * Sizing is scaled ~0.85× from the full-width web app so it fits an Obsidian
+ * sidebar. Colors map onto the host theme via Obsidian variables (light/dark). */
+
+.dsh-chat {
+  /* ---- mapped design tokens (dsh-web aliases → Obsidian theme) ---- */
+  --dshc-label-primary: var(--text-normal);
+  --dshc-label-secondary: var(--text-muted);
+  --dshc-label-tertiary: var(--text-faint);
+  --dshc-border-l1: var(--background-modifier-border-hover);
+  --dshc-border-l2: var(--background-modifier-border);
+  --dshc-bg-input: var(--background-primary);
+  --dshc-bg-menu: var(--background-primary);
+  --dshc-code-block: var(--background-secondary);
+  --dshc-accent: var(--interactive-accent);
+  --dshc-accent-hover: var(--interactive-accent-hover);
+  --dshc-on-accent: var(--text-on-accent);
+  --dshc-red: var(--color-red);
+  --dshc-green: var(--color-green);
+  --dshc-yellow: var(--color-yellow);
+  --dshc-ok: var(--color-green);
+
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-size: 14px;
+  /* Containing block for any dropdown that escapes its header anchor. */
+  position: relative;
+}
+
+@supports (color: color-mix(in srgb, red, blue)) {
+  .dsh-chat {
+    --dshc-interactive-hover: color-mix(in srgb, var(--text-normal) 6%, transparent);
+    --dshc-interactive-active: color-mix(in srgb, var(--text-normal) 10%, transparent);
+    --dshc-bubble: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+    --dshc-status-ok-bg: color-mix(in srgb, var(--color-green) 16%, transparent);
+    --dshc-status-run-bg: color-mix(in srgb, var(--color-yellow) 18%, transparent);
+    --dshc-status-dead-bg: color-mix(in srgb, var(--color-red) 14%, transparent);
+    --dshc-banner-bg: color-mix(in srgb, var(--color-red) 10%, transparent);
+  }
+}
+@supports not (color: color-mix(in srgb, red, blue)) {
+  .dsh-chat {
+    --dshc-interactive-hover: var(--background-modifier-hover);
+    --dshc-interactive-active: var(--background-modifier-active-hover);
+    --dshc-bubble: var(--background-secondary);
+    --dshc-status-ok-bg: var(--background-modifier-success);
+    --dshc-status-run-bg: var(--background-modifier-hover);
+    --dshc-status-dead-bg: var(--background-modifier-error);
+    --dshc-banner-bg: var(--background-modifier-error);
+  }
+}
+
+/* Slim scrollbars inside the view, mirroring --dsh-scrollbar-thumb tokens. */
+.dsh-chat .dshc-scroll,
+.dsh-chat .dshc-inputscroll,
+.dsh-chat .dshc-pre,
+.dsh-chat .dshc-thinkbody,
+.dsh-chat .dshc-menu {
+  scrollbar-width: thin;
+  scrollbar-color: var(--background-modifier-border) transparent;
+}
+.dsh-chat .dshc-scroll::-webkit-scrollbar,
+.dsh-chat .dshc-inputscroll::-webkit-scrollbar,
+.dsh-chat .dshc-pre::-webkit-scrollbar,
+.dsh-chat .dshc-thinkbody::-webkit-scrollbar,
+.dsh-chat .dshc-menu::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.dsh-chat .dshc-scroll::-webkit-scrollbar-thumb,
+.dsh-chat .dshc-inputscroll::-webkit-scrollbar-thumb,
+.dsh-chat .dshc-pre::-webkit-scrollbar-thumb,
+.dsh-chat .dshc-thinkbody::-webkit-scrollbar-thumb,
+.dsh-chat .dshc-menu::-webkit-scrollbar-thumb {
+  background: var(--background-modifier-border);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* ---------------------------------------------------------------- header */
+.dsh-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--dshc-border-l2);
+}
+
+.dsh-iconbtn {
+  display: grid;
+  place-items: center;
+  padding: 4px;
+}
+.dsh-iconbtn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* session-history dropdown, anchored under the header's right edge */
+.dshc-history {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 8px;
+  z-index: 100;
+  width: min(320px, calc(100% - 16px));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--dshc-border-l1);
+  border-radius: 12px;
+  background: var(--dshc-bg-menu);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    0 10px 30px -6px rgba(0, 0, 0, 0.16);
+  transform-origin: top right;
+  animation: dshc-menu-in 0.12s ease-out;
+  overflow: hidden;
+}
+.dshc-history[hidden] {
+  display: none;
+}
+.dshc-history-title {
+  flex: none;
+  padding: 10px 12px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dshc-label-secondary);
+  letter-spacing: 0.02em;
+}
+.dshc-history-list {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 0 6px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--background-modifier-border) transparent;
+}
+.dshc-history-empty {
+  padding: 18px 10px;
+  text-align: center;
+  color: var(--dshc-label-tertiary);
+  font-size: 12px;
+}
+/* Flat session rows immune to host-theme button chrome (bg/shadow leak). */
+.dsh-chat .dshc-history-row {
+  display: flex;
+  flex-direction: column;
+  /* Session text stays left-aligned even if host-theme button chrome centers
+   * flex children; the archive action is absolute-positioned on the right. */
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 2px;
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: var(--dshc-label-primary);
+  position: relative;
+}
+.dsh-chat .dshc-history-row:hover {
+  background: var(--dshc-interactive-hover);
+}
+.dshc-history-row.pending::after,
+.dshc-history-row.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 2px;
+}
+.dshc-history-row.active::before {
+  background: var(--dshc-accent);
+}
+.dshc-history-row.pending::after {
+  background: var(--dshc-yellow);
+  animation: dshc-pulse 1.2s ease-in-out infinite;
+}
+.dshc-history-name {
+  font-size: 13px;
+  line-height: 19px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dshc-history-meta {
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--dshc-label-tertiary);
+}
+/* Row wrapper: hosts the open-row button plus the hover-revealed archive
+ * action, so no interactive element ever nests inside another button. */
+.dshc-history-entry {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.dshc-history-entry .dshc-history-row {
+  /* leave room for the archive action on the right */
+  padding-right: 34px;
+}
+.dshc-history-entry.archiving {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.dshc-history-archive {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--dshc-label-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.1s ease,
+    background-color 0.1s ease,
+    color 0.1s ease;
+}
+.dshc-history-entry:hover .dshc-history-archive,
+.dshc-history-archive:focus-visible {
+  opacity: 1;
+}
+.dshc-history-archive:hover:not(:disabled) {
+  background: var(--dshc-interactive-hover);
+  color: var(--dshc-label-primary);
+}
+.dshc-history-archive:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.dshc-history-archive svg {
+  width: 14px;
+  height: 14px;
+}
+.dshc-history-foot {
+  flex: none;
+  padding: 7px 12px;
+  border-top: 1px solid var(--dshc-border-l1);
+  color: var(--dshc-label-tertiary);
+  font-size: 10.5px;
+  line-height: 14px;
+}
+
+.dsh-status {
+  flex: none;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 9px;
+  border-radius: 11px;
+  background: var(--dshc-interactive-hover);
+  color: var(--dshc-label-secondary);
+  font-size: var(--font-ui-smaller);
+  text-transform: capitalize;
+  line-height: 16px;
+}
+.dsh-status[data-status="ready"] {
+  background: var(--dshc-status-ok-bg);
+  color: var(--dshc-label-primary);
+}
+.dsh-status[data-status="running"] {
+  background: var(--dshc-status-run-bg);
+  color: var(--dshc-label-primary);
+}
+.dsh-status[data-status="stopped"],
+.dsh-status[data-status="connecting"] {
+  background: var(--dshc-status-dead-bg);
+}
+
+/* Current session title — the header's identity caption (replaces model text). */
+.dsh-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--dshc-label-primary);
+  cursor: default;
+}
+
+/* Explicit "New chat" pill — labeled so the action is impossible to miss. */
+.dsh-newchat-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--dshc-label-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  letter-spacing: 0.01em;
+  transition:
+    background-color 0.1s ease,
+    color 0.1s ease;
+}
+.dsh-newchat-btn:hover:not(:disabled),
+.dsh-newchat-btn:focus-visible {
+  background: var(--dshc-interactive-hover);
+  color: var(--dshc-label-primary);
+  outline: none;
+  box-shadow: none;
+}
+.dsh-newchat-icon {
+  display: inline-flex;
+  flex: none;
+}
+.dsh-newchat-icon svg {
+  width: 13px;
+  height: 13px;
+}
+.dsh-newchat-label {
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------- message flow */
+.dshc-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  container-type: inline-size;
+  overscroll-behavior: contain;
+}
+.dshc-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px; /* dsh ChatView._column gap */
+  width: 100%;
+  padding: 16px 12px 8px;
+  box-sizing: border-box;
+  min-height: 100%;
+  justify-content: flex-start;
+}
+.dshc-column:empty::before {
+  content: "有什么可以帮你的吗？";
+  margin: auto;
+  padding-top: 96px;
+  color: var(--dshc-label-tertiary);
+  font-size: 13px;
+  text-align: center;
+}
+.dshc-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* user bubble — MessageItem._bubble */
+.dshc-userrow {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.dshc-bubble {
+  max-width: min(92%, 525px);
+  width: fit-content;
+  background: var(--dshc-bubble);
+  color: var(--dshc-label-primary);
+  border-radius: 19px;
+  padding: 8px 14px;
+  font-size: 14px;
+  line-height: 22px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* system / error notes */
+.dsh-system {
+  align-self: stretch;
+  color: var(--dshc-red);
+  font-size: var(--font-ui-smaller);
+  border-left: 3px solid var(--dshc-red);
+  padding-left: 8px;
+  line-height: 20px;
+}
+
+/* streaming status line — ChatView._turnStatus shimmer + clock */
+.dshc-turnstatus {
+  display: inline-flex;
+  align-items: baseline;
+  align-self: flex-start;
+  height: 22px;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.dshc-turnstatus-text {
+  background: linear-gradient(
+    90deg,
+    var(--dshc-accent) 0%,
+    var(--dshc-accent) 40%,
+    var(--dshc-label-tertiary) 50%,
+    var(--dshc-accent) 60%,
+    var(--dshc-accent) 100%
+  );
+  background-position: 100% 0;
+  background-size: 250% 100%;
+  color: #0000;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: dshc-shimmer 1.8s linear infinite;
+}
+.dshc-turnstatus-clock {
+  font-size: var(--font-ui-smaller);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--dshc-label-tertiary);
+  margin-left: 8px;
+}
+@keyframes dshc-shimmer {
+  to {
+    background-position: 0 0;
+  }
+}
+
+/* -------------------------------------------- disclosure rows (Think/tools)
+ * Structure per dsh DisclosureRow/ReasoningRow/GenericCommandCard:
+ * [leading icon ⇄ chevron] title · dot · summary; body below when open. */
+.dshc-disc {
+  font-size: var(--font-ui-small);
+}
+.dshc-disc > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+.dshc-disc > summary::-webkit-details-marker {
+  display: none;
+}
+.dshc-discrow {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  min-width: 0;
+  gap: 0;
+}
+.dshc-leading {
+  position: relative;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--dshc-label-tertiary);
+}
+.dshc-ico,
+.dshc-chev {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  transition: opacity 0.1s ease;
+}
+.dshc-chev {
+  opacity: 0;
+  transition:
+    transform 0.12s ease,
+    opacity 0.1s ease;
+}
+.dshc-discrow:hover .dshc-ico,
+.dshc-disc[open] > summary .dshc-ico {
+  opacity: 0;
+}
+.dshc-discrow:hover .dshc-chev,
+.dshc-disc[open] > summary .dshc-chev {
+  opacity: 1;
+}
+.dshc-disc[open] > summary .dshc-chev svg {
+  transform: rotate(180deg);
+}
+.dshc-title {
+  flex: none;
+  color: var(--dshc-label-secondary);
+  font-size: 13px;
+  line-height: 24px;
+  font-weight: 400;
+}
+.dshc-title.mono {
+  font-family: var(--font-monospace);
+  font-size: 12px;
+}
+.dshc-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin: 0 7px 0 8px;
+  color: var(--dshc-yellow);
+  position: relative;
+}
+.dshc-dot::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.dshc-tool .dshc-dot,
+.dshc-reasoning[data-state="running"] .dshc-dot {
+  animation: dshc-pulse 1.2s ease-in-out infinite;
+}
+.dshc-dot[data-state="ok"],
+.dshc-tool[data-state="ok"] .dshc-dot {
+  color: var(--dshc-ok);
+  animation: none;
+}
+.dshc-tool[data-state="error"] .dshc-dot {
+  color: var(--dshc-red);
+  animation: none;
+}
+@keyframes dshc-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.dshc-sep {
+  flex: none;
+  width: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--dshc-label-tertiary);
+  margin: 0 8px;
+}
+.dshc-sum {
+  flex: auto;
+  min-width: 0;
+  color: var(--dshc-label-tertiary);
+  font-size: 12.5px;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* running sweep overlay (ReasoningRow / GenericCommandCard `:after`) */
+.dshc-disc[data-state="running"] .dshc-discrow::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 220px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--dshc-bg-input) 65%, transparent) 55%,
+    transparent 100%
+  );
+  animation: dshc-sweep 2.6s ease-out infinite;
+}
+@keyframes dshc-sweep {
+  0% {
+    left: -220px;
+  }
+  90%,
+  to {
+    left: 100%;
+  }
+}
+
+/* think body */
+.dshc-thinkbody {
+  color: var(--dshc-label-tertiary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 2px 0 2px 22px;
+  font-size: var(--font-ui-smaller);
+  line-height: 21px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/* tools */
+.dshc-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dshc-toolbody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--dshc-border-l1);
+  background: var(--dshc-code-block);
+  border-radius: 10px;
+  margin: 4px 0 4px 22px;
+  padding: 8px 12px;
+  font-family: var(--font-monospace);
+  font-size: 11.5px;
+  line-height: 17px;
+  color: var(--dshc-label-primary);
+}
+.dshc-pre {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-height: 200px;
+  overflow-y: auto;
+  color: var(--dshc-label-primary);
+}
+
+/* usage + turn error */
+.dshc-usage {
+  font-size: 10.5px;
+  color: var(--dshc-label-tertiary);
+  line-height: 16px;
+}
+.dshc-error:not(:empty) {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 2px 0;
+}
+.dshc-error-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dshc-red);
+  margin-top: 6px;
+}
+.dshc-error-msg {
+  color: var(--dshc-red);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+/* message footer: copy action + token usage left-aligned; hidden while the
+ * turn is still streaming (revealed via .is-pending in finishAssistant). */
+.dshc-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  min-width: 0;
+  margin-top: 2px;
+}
+.dshc-foot.is-pending {
+  display: none;
+}
+
+/* Ghost copy pill — used under messages and in the history panel header.
+ * Flat styling on purpose so host-theme button chrome never leaks in. */
+.dsh-chat .dshc-copybtn,
+.dsh-chat .dshc-copybtn:hover {
+  background: transparent;
+  box-shadow: none;
+}
+.dsh-chat .dshc-copybtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--dshc-border-l2);
+  border-radius: 999px;
+  color: var(--dshc-label-tertiary);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 20px;
+  transition:
+    background-color 0.1s ease,
+    color 0.1s ease,
+    border-color 0.1s ease;
+}
+.dsh-chat .dshc-copybtn:hover:not(:disabled),
+.dsh-chat .dshc-copybtn:focus-visible {
+  background: var(--dshc-interactive-hover);
+  color: var(--dshc-label-primary);
+  outline: none;
+}
+.dshc-copybtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.dshc-copybtn .dshc-copy-icon {
+  display: inline-flex;
+  flex: none;
+}
+.dshc-copybtn .dshc-copy-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Chat text is plain content: keep it mouse-selectable like normal notes
+ * even if a host theme sets user-select:none on workspace chrome. */
+.dsh-chat .dshc-md,
+.dsh-chat .dshc-bubble,
+.dsh-chat .dshc-thinkbody,
+.dsh-chat .dshc-toolbody,
+.dsh-chat .dshc-pre,
+.dsh-chat .dshc-usage,
+.dsh-chat .dshc-error-msg,
+.dsh-chat .dsh-system {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* ------------------------------------------------ assistant markdown (.md)
+ * Typography follows AssistantMarkdown + _markdown_1r4m5_5, scaled down. */
+.dshc-md {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--dshc-label-primary);
+  font-size: 14px;
+  line-height: 25px;
+}
+.dshc-md strong {
+  font-weight: 600;
+}
+.dshc-md h1,
+.dshc-md h2,
+.dshc-md h3,
+.dshc-md h4,
+.dshc-md h5,
+.dshc-md h6 {
+  font-weight: 600;
+  line-height: 26px;
+  margin: 20px 0 10px;
+}
+.dshc-md h1 {
+  font-size: 19px;
+}
+.dshc-md h2 {
+  font-size: 17px;
+}
+.dshc-md h3 {
+  font-size: 15.5px;
+}
+.dshc-md h4,
+.dshc-md h5,
+.dshc-md h6 {
+  font-size: 14px;
+}
+.dshc-md p {
+  margin: 12px 0;
+}
+.dshc-md ul,
+.dshc-md ol {
+  margin: 12px 0;
+  padding-inline-start: 20px;
+}
+.dshc-md li:not(:first-child) {
+  margin-top: 4px;
+}
+.dshc-md li p {
+  margin: 4px 0;
+}
+.dshc-md li > *:first-child {
+  margin-top: 0;
+}
+.dshc-md li > *:last-child {
+  margin-bottom: 0;
+}
+.dshc-md li::marker {
+  color: var(--dshc-label-secondary);
+}
+.dshc-md hr {
+  border: none;
+  height: 1px;
+  background: var(--dshc-border-l2);
+  margin: 20px 0;
+}
+.dshc-md blockquote {
+  border-left: 2px solid var(--dshc-label-tertiary);
+  margin: 12px 0 0;
+  padding-left: 12px;
+  color: var(--dshc-label-secondary);
+}
+.dshc-md a {
+  color: var(--dshc-accent);
+}
+.dshc-md :not(pre) > code {
+  background: var(--dshc-code-block);
+  border-radius: 5px;
+  padding: 1.5px 5px;
+  font-family: var(--font-monospace);
+  font-size: 0.86em;
+  color: var(--dshc-label-primary);
+}
+.dshc-md :where(h1, h2, h3, h4, h5, h6) code {
+  font-size: inherit;
+}
+.dshc-md pre[class*="language-"],
+.dshc-md pre {
+  background: var(--dshc-code-block);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin: 12px 0;
+  font-size: 12px;
+  line-height: 20px;
+  font-family: var(--font-monospace);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.dshc-md pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+.dshc-md table {
+  border-collapse: collapse;
+  width: max-content;
+  max-width: 100%;
+  margin: 12px 0;
+}
+.dshc-md th,
+.dshc-md td {
+  text-align: start;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--dshc-border-l1);
+  font-size: 13px;
+  line-height: 20px;
+}
+.dshc-md th {
+  font-weight: 600;
+  border-bottom-color: var(--dshc-border-l2);
+}
+.dshc-md th:first-child,
+.dshc-md td:first-child {
+  padding-left: 0;
+}
+.dshc-md td:last-child,
+.dshc-md th:last-child {
+  padding-right: 0;
+}
+.dshc-md input[type="checkbox"] {
+  accent-color: var(--dshc-label-secondary);
+  margin-right: 6px;
+}
+.dshc-md img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+/* Obsidian embeds callout-style blocks in markdown output; keep them calm. */
+.dshc-md .callout {
+  border-radius: 10px;
+  background: var(--dshc-code-block);
+  font-size: 13px;
+}
+
+/* --------------------------------------------------------------- composer */
+.dsh-composer {
+  padding: 8px 10px 10px;
+  flex: none;
+}
+/* InputBar._card */
+.dshc-card {
+  box-sizing: border-box;
+  width: 100%;
+  background: var(--dshc-bg-input);
+  border: 1px solid var(--dshc-border-l2);
+  border-radius: 18px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    0 6px 18px -6px rgba(0, 0, 0, 0.08);
+  padding: 10px 6px 6px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  transition: border-color 0.12s ease;
+}
+.dshc-card:focus-within {
+  border-color: var(--interactive-accent);
+}
+
+/* The scroll cap lives here, not on the textarea — so the textarea itself
+ * never shows a scrollbar (InputBar._scroll + _input[overflow:hidden]). */
+.dshc-inputscroll {
+  max-height: calc(var(--dsh-input-max-lines, 5) * 26px + 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 12px;
+}
+.dsh-input {
+  display: block;
+  width: 100%;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  caret-color: var(--dshc-accent);
+  color: var(--dshc-label-primary);
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 26px;
+  min-height: calc(2 * 26px + 12px); /* ~2 lines */
+  box-sizing: border-box;
+  padding: 6px 10px 6px;
+  overflow: hidden; /* no textarea scrollbar, ever */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.dsh-input::placeholder,
+.dsh-input::-webkit-input-placeholder {
+  color: var(--dshc-label-tertiary);
+  opacity: 1; /* guard against host agent stylesheets dimming placeholders */
+  user-select: none;
+}
+/* The composer textarea lives on its own card — never pick up a host-theme
+ * hover gray background. */
+.dsh-chat .dsh-input:hover,
+.dsh-chat .dsh-input:focus,
+.dsh-chat .dsh-input:active {
+  background: transparent;
+}
+.dsh-input:disabled {
+  cursor: not-allowed;
+}
+
+/* bottom row: mode select left, send right (InputBar._row/_tools/_trailing) */
+.dshc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 6px 2px;
+}
+.dshc-rowspacer {
+  flex: 1;
+  min-width: 8px;
+}
+
+/* PermissionSelect trigger pill */
+.dshc-modewrap {
+  position: relative;
+  min-width: 0;
+}
+.dshc-mode-trigger {
+  min-width: 0;
+  max-width: 220px;
+  height: 26px;
+  color: var(--dshc-label-secondary);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  outline: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 5px 0 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 20px;
+  font-family: inherit;
+}
+.dshc-mode-trigger:hover:not(:disabled) {
+  background: var(--dshc-interactive-hover);
+}
+.dshc-mode-trigger:focus-visible {
+  box-shadow: 0 0 0 2px var(--dshc-border-l1);
+}
+.dshc-trigger-icon {
+  flex: none;
+  display: inline-flex;
+}
+.dshc-trigger-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.dshc-trigger-label {
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+}
+.dshc-trigger-chevron {
+  flex: none;
+  display: inline-flex;
+  color: var(--dshc-label-tertiary);
+  transition: transform 0.12s ease;
+}
+.dshc-trigger-chevron svg {
+  width: 13px;
+  height: 13px;
+}
+.dshc-mode-trigger.open .dshc-trigger-chevron {
+  transform: rotate(180deg);
+}
+
+/* Menu popped above the trigger, dsh Menu._list/_sideTop/_item */
+.dshc-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  z-index: 100;
+  min-width: 200px;
+  max-height: 320px; /* cap the list height … */
+  overflow-y: auto; /* … and scroll inside it */
+  overscroll-behavior: contain;
+  box-sizing: border-box;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--dshc-border-l1);
+  border-radius: 12px;
+  background: var(--dshc-bg-menu);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    0 10px 30px -6px rgba(0, 0, 0, 0.16);
+  transform-origin: bottom left;
+  animation: dshc-menu-in 0.12s ease-out;
+}
+.dshc-menu[hidden] {
+  display: none;
+}
+/* Flat rows — deliberately stronger selectors so host-theme `button` chrome
+ * (background, border, --input-shadow) never leaks into menu items. */
+.dsh-chat .dshc-menu-item,
+.dsh-chat .dshc-menu-item:hover {
+  background: transparent;
+}
+.dsh-chat .dshc-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 5px 9px;
+  border: none;
+  border-radius: 8px;
+  box-shadow: none;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dshc-label-primary);
+  text-align: left;
+  font-family: inherit;
+  transition: background-color 0.1s ease;
+}
+.dsh-chat .dshc-menu-item:hover:not(:disabled) {
+  background: var(--dshc-interactive-hover);
+}
+.dshc-item-icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--dshc-label-tertiary);
+}
+.dshc-item-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.dshc-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dshc-item-check {
+  flex: none;
+  display: inline-flex;
+  color: var(--dshc-label-primary);
+  opacity: 0;
+}
+.dshc-item-check svg {
+  width: 13px;
+  height: 13px;
+}
+.dshc-menu-item.selected .dshc-item-check {
+  opacity: 1;
+}
+/* placeholder row while the model catalog request is still in flight */
+.dshc-menu-empty {
+  flex: none;
+  padding: 12px 14px;
+  color: var(--dshc-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+  user-select: none;
+}
+@keyframes dshc-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px) scale(0.98);
+  }
+}
+
+/* model picker menu rows (two-line: model name + provider) */
+.dshc-modelwrap {
+  flex-shrink: 1;
+  min-width: 0;
+}
+/* The model dropdown is narrower than the shared menu default and capped so
+ * long model names ellipsize without overflowing the sidebar width. */
+.dshc-modelwrap .dshc-menu {
+  min-width: 200px;
+  max-width: min(360px, calc(100% - 32px));
+}
+.dshc-model-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+.dshc-model-name {
+  font-size: 13px;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dshc-label-primary);
+}
+.dshc-model-provider {
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--dshc-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* primary circular button (InputBar._primary) — send ⇄ stop glyph */
+.dshc-send {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 999px;
+  background: var(--dshc-accent);
+  color: var(--dshc-on-accent);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  transition:
+    background-color 0.1s ease,
+    opacity 0.1s ease;
+}
+.dshc-send:hover:not(:disabled) {
+  background: var(--dshc-accent-hover);
+}
+.dshc-send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.dshc-send-icon,
+.dshc-stop-icon {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  place-items: center;
+}
+.dshc-send-icon svg,
+.dshc-stop-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.dshc-stop-icon {
+  opacity: 0;
+}
+.dshc-send.is-running .dshc-send-icon {
+  opacity: 0;
+}
+.dshc-send.is-running .dshc-stop-icon {
+  opacity: 1;
+}
+
+/* Red Stop affordance while a turn is generating (mirrors dsh web). */
+.dshc-send.is-running {
+  background: var(--dshc-red);
+  color: #fff;
+}
+.dshc-send.is-running:hover:not(:disabled) {
+  background: var(--dshc-red);
+  filter: brightness(0.92);
+}
+
+/* banner */
+.dsh-banner {
+  margin: 0;
+  padding: 6px 12px;
+  background: var(--dshc-banner-bg);
+  color: var(--dshc-red);
+  font-size: var(--font-ui-smaller);
+  border-top: 1px solid var(--dshc-border-l2);
+}
+
+/* ---------------------------------------------------- reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .dshc-turnstatus-text,
+  .dshc-tool .dshc-dot,
+  .dshc-reasoning[data-state="running"] .dshc-dot {
+    animation: none;
+  }
+  .dshc-disc[data-state="running"] .dshc-discrow::after {
+    animation: none;
+    content: none;
+  }
+  .dshc-menu {
+    animation: none;
+  }
+}

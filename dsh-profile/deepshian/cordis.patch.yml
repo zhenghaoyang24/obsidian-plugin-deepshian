@@ -1,0 +1,10 @@
+# DeepShian bridge profile — user patch layer applied after the dsh-base bundle.
+# Inserts the JSONL stdio bridge (no Web server, no browser) so the Obsidian
+# plugin can drive the real dsh Agent core over stdin/stdout.
+#
+# The plugin auto-installs this profile and generates this file with your
+# machine's real home path. When installing manually, replace <YOUR-HOME> with
+# your user home directory, e.g. file:///C:/Users/YourName/.dsh/profiles/deepshian/deepshian-bridge.mjs
+- insert:
+    - id: deepshian-bridge
+      name: file:///C:/Users/<YOUR-HOME>/.dsh/profiles/deepshian/deepshian-bridge.mjs

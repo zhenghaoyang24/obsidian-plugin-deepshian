@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Build output (build/main.js + copied assets)
+build/
+
+# Logs
+*.log
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor state
+.idea/
+.vscode/
