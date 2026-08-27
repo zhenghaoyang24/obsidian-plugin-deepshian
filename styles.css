@@ -1235,6 +1235,16 @@
   font-size: var(--font-ui-smaller);
   border-top: 1px solid var(--dshc-border-l2);
 }
+.dsh-chat .dsh-banner.is-hidden {
+  display: none;
+}
+
+/* Ghost textarea for the legacy clipboard fallback — fixed & invisible while
+ * it briefly holds focus, never part of the visible layout. */
+.dsh-clipboard-ghost {
+  position: fixed;
+  opacity: 0;
+}
 
 /* ---------------------------------------------------- reduced motion */
 @media (prefers-reduced-motion: reduce) {

@@ -1,61 +1,90 @@
-name: Release Obsidian plugin
+name: Release
 
 on:
   push:
     tags:
-      - "*" # Any tag, e.g. 1.0.0 — see the tag-version guard below
+      - "[0-9]+.[0-9]+.[0-9]+" # Auto-release when a pure numeric version tag is pushed, e.g. 1.0.0
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g., 1.0.4). Must match an existing tag."
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Use Node.js
-        uses: actions/setup-node@v4
+      - name: Checkout main branch
+        uses: actions/checkout@v4
         with:
-          node-version: "22" # keep in sync with engines/@types/node
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # keep in sync with @types/node in package.json
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build plugin
-        run: npm run build # typecheck + bundle to build/ (main.js, manifest.json, styles.css)
-
-      # Obsidian only accepts x.y.z tags that exactly match the version in
-      # manifest.json — no "v" prefix. Fail loudly instead of shipping a
-      # release Obsidian's updater can never find.
-      - name: Check tag matches manifest.json version
+      - name: Determine version
+        id: version
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          manifest_version="$(node -p "require('./manifest.json').version")"
-          if [ "${tag}" != "${manifest_version}" ]; then
-            echo "::error::Tag '${tag}' does not match manifest.json version '${manifest_version}'. Obsidian only accepts tags in x.y.z format that exactly match the manifest version (no 'v' prefix). Bump manifest.json and tag the new version."
-            exit 1
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Get the version from the tag name (tags carry no "v" prefix)
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            # Manual trigger: use the input version
+            VERSION="${{ inputs.version }}"
           fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Releasing $VERSION"
+
+      - name: Check if release exists
+        id: check
+        run: |
+          if gh release view "${{ steps.version.outputs.version }}" --json tagName &>/dev/null; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Skip if already released
+        if: steps.check.outputs.exists == 'true'
+        run: echo "Release ${{ steps.version.outputs.version }} already exists, skipped"
+
+      - name: Build plugin
+        if: steps.check.outputs.exists == 'false'
+        run: npm run build
 
       - name: Attest build provenance
-        uses: actions/attest@v1
+        if: steps.check.outputs.exists == 'false'
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             build/main.js
-            build/manifest.json
             build/styles.css
+            build/manifest.json
 
-      - name: Create release
+      - name: Create GitHub Release
+        if: steps.check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          files: |
+            build/main.js
+            build/styles.css
+            build/manifest.json
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          tag="${GITHUB_REF#refs/tags/}"
-
-          # Draft release: assets attached, then edit + add notes + publish in
-          # the GitHub UI (same flow as the official Obsidian sample plugin).
-          gh release create "$tag" \
-            --title="$tag" \
-            --draft \
-            build/main.js build/manifest.json build/styles.css

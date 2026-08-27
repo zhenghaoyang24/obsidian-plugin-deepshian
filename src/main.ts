@@ -72,7 +72,11 @@ export default class DshBridgePlugin extends Plugin {
 		}
 		await leaf.setViewState({ type: VIEW_TYPE_DSH_CHAT, active: true });
 		if (reset) (leaf.view as DshChatView).startNewChat();
-		this.app.workspace.revealLeaf(leaf);
+		// revealLeaf() requires Obsidian >= 1.7.2, newer than the declared
+		// minAppVersion 1.5.7. The view was just loaded and activated by the
+		// awaited setViewState above, so setActiveLeaf() (available since 0.16.3)
+		// brings it to the foreground with the same visible result.
+		this.app.workspace.setActiveLeaf(leaf, { focus: true });
 	}
 
 	// --------------------------------------------------------------- bridge

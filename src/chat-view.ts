@@ -196,8 +196,22 @@ const ICON_SPARKLE = svg(
 	'<path fill="currentColor" d="M6.1 3.1Q6.6 7.8 11.3 8.3Q6.6 8.8 6.1 13.5Q5.6 8.8 0.9 8.3Q5.6 7.8 6.1 3.1Z"/><path fill="currentColor" d="M11.9 1Q12.2 3.7 14.9 4Q12.2 4.3 11.9 7Q11.6 4.3 8.9 4Q11.6 3.7 11.9 1Z"/><path fill="currentColor" d="M12.5 9.4Q12.7 11.4 14.7 11.6Q12.7 11.8 12.5 13.8Q12.3 11.8 10.3 11.6Q12.3 11.4 12.5 9.4Z"/>',
 );
 
-function span(cls: string, html: string): string {
-	return `<span class="${cls}">${html}</span>`;
+/**
+ * Render one compile-time-constant SVG icon (see `svg()`) as a detached DOM
+ * element. Icons are fixed literals bundled with the plugin — no dynamic data
+ * ever reaches this markup — so parsing them with DOMParser is a safe
+ * replacement for HTML-string injection into the DOM. The parsed element is cached
+ * and deep-cloned per call so the same icon can mount in several places.
+ */
+const ICON_CACHE = new Map<string, Element>();
+
+function svgIcon(html: string): Element {
+	const cached = ICON_CACHE.get(html);
+	if (cached) return cached.cloneNode(true) as Element;
+	const el = new DOMParser().parseFromString(html, "image/svg+xml").documentElement;
+	if (el.nodeName !== "svg") throw new Error("invalid icon markup");
+	ICON_CACHE.set(html, el);
+	return el.cloneNode(true) as Element;
 }
 
 /**
@@ -276,9 +290,8 @@ export class DshChatView extends ItemView {
 		this.columnEl = this.messagesEl.createDiv({ cls: "dshc-column" });
 		this.buildComposer();
 		this.bannerEl = this.contentEl.createDiv({
-			cls: "dsh-banner",
+			cls: "dsh-banner is-hidden",
 			text: "",
-			attr: { style: "display:none" },
 		});
 		document.addEventListener("pointerdown", this.onDocPointerDown);
 		this.plugin.bindView(this);
@@ -560,7 +573,7 @@ export class DshChatView extends ItemView {
 			cls: "clickable-icon dsh-iconbtn",
 			attr: { "aria-label": tt("历史会话", "Session history"), "aria-haspopup": "true" },
 		});
-		this.historyBtn.innerHTML = ICON_HISTORY;
+		this.historyBtn.append(svgIcon(ICON_HISTORY));
 		this.historyBtn.addEventListener("click", () => {
 			if (this.historyPanelEl.hasAttribute("hidden")) this.openHistory();
 			else this.closeHistory();
@@ -571,7 +584,7 @@ export class DshChatView extends ItemView {
 			cls: "dsh-newchat-btn",
 			attr: { type: "button", "aria-label": tt("新会话", "New session") },
 		});
-		newChat.createSpan({ cls: "dsh-newchat-icon" }).innerHTML = ICON_PLUS;
+		newChat.createSpan({ cls: "dsh-newchat-icon" }).append(svgIcon(ICON_PLUS));
 		newChat.createSpan({ cls: "dsh-newchat-label", text: tt("新会话", "New session") });
 		newChat.addEventListener("click", () => this.startNewChat());
 	}
@@ -688,7 +701,7 @@ export class DshChatView extends ItemView {
 					title: tt("归档会话（与 dsh web 同步）", "Archive session (synced with dsh web)"),
 				},
 			});
-			archive.innerHTML = ICON_ARCHIVE;
+			archive.append(svgIcon(ICON_ARCHIVE));
 			// Never archive the live session mid-turn: the bridge would reject the
 			// switch anyway; disabling the affordance is the honest state.
 			archive.disabled = s.id === this.activeSessionId && this.isBusy();
@@ -750,17 +763,18 @@ export class DshChatView extends ItemView {
 		this.modeTriggerLabel = this.modeTriggerBtn.createSpan({ cls: "dshc-trigger-label" });
 		this.modeTriggerBtn
 			.createSpan({ cls: "dshc-trigger-chevron" })
-			.innerHTML = ICON_CHEVRON;
+			.append(svgIcon(ICON_CHEVRON));
 		this.modeMenuEl = modewrap.createDiv({ cls: "dshc-menu", attr: { hidden: "" } });
 		for (const value of ["readonly", "writable"] as ChatMode[]) {
 			const item = this.modeMenuEl.createEl("button", {
 				cls: "dshc-menu-item",
 				attr: { type: "button", role: "option", "data-value": value },
 			});
-			item.createSpan({ cls: "dshc-item-icon" }).innerHTML =
-				value === "readonly" ? ICON_MODE_READONLY : ICON_MODE_WRITE;
+			item.createSpan({ cls: "dshc-item-icon" }).append(
+				svgIcon(value === "readonly" ? ICON_MODE_READONLY : ICON_MODE_WRITE),
+			);
 			item.createSpan({ cls: "dshc-item-label", text: MODE_META[value].label });
-			item.createSpan({ cls: "dshc-item-check" }).innerHTML = ICON_CHECK;
+			item.createSpan({ cls: "dshc-item-check" }).append(svgIcon(ICON_CHECK));
 			item.addEventListener("click", () => {
 				if (this.mode !== value) {
 					this.mode = value;
@@ -778,9 +792,9 @@ export class DshChatView extends ItemView {
 		// Model selector, immediately left of the send button (dsh web style).
 		this.modelWrapEl = row.createDiv({ cls: "dshc-modewrap dshc-modelwrap" });
 		this.modelBtn = this.modelWrapEl.createEl("button", { cls: "dshc-mode-trigger" });
-		this.modelBtn.createSpan({ cls: "dshc-trigger-icon" }).innerHTML = ICON_SPARKLE;
+		this.modelBtn.createSpan({ cls: "dshc-trigger-icon" }).append(svgIcon(ICON_SPARKLE));
 		this.modelBtnLabel = this.modelBtn.createSpan({ cls: "dshc-trigger-label" });
-		this.modelBtn.createSpan({ cls: "dshc-trigger-chevron" }).innerHTML = ICON_CHEVRON;
+		this.modelBtn.createSpan({ cls: "dshc-trigger-chevron" }).append(svgIcon(ICON_CHEVRON));
 		this.modelMenuEl = this.modelWrapEl.createDiv({ cls: "dshc-menu", attr: { hidden: "" } });
 		this.modelBtn.addEventListener("click", () => {
 			if (this.plugin.bridgeStatus() === "stopped") {
@@ -801,8 +815,8 @@ export class DshChatView extends ItemView {
 
 		// Primary round button; the icon flips to the stop glyph while running.
 		this.sendBtn = row.createEl("button", { cls: "dshc-send", attr: { type: "button" } });
-		this.sendBtn.createSpan({ cls: "dshc-send-icon" }).innerHTML = ICON_SEND;
-		this.sendBtn.createSpan({ cls: "dshc-stop-icon" }).innerHTML = ICON_STOP;
+		this.sendBtn.createSpan({ cls: "dshc-send-icon" }).append(svgIcon(ICON_SEND));
+		this.sendBtn.createSpan({ cls: "dshc-stop-icon" }).append(svgIcon(ICON_STOP));
 		this.sendBtn.addEventListener("click", () => {
 			const running = this.plugin.bridgeStatus() === "running" || this.currentAssistant !== null;
 			if (running) {
@@ -818,8 +832,9 @@ export class DshChatView extends ItemView {
 	private applyMode(): void {
 		const meta = MODE_META[this.mode];
 		this.modeTriggerLabel.setText(meta.label);
-		this.modeTriggerIcon.innerHTML =
-			this.mode === "readonly" ? ICON_MODE_READONLY : ICON_MODE_WRITE;
+		this.modeTriggerIcon.replaceChildren(
+			svgIcon(this.mode === "readonly" ? ICON_MODE_READONLY : ICON_MODE_WRITE),
+		);
 		this.modeTriggerBtn.setAttribute(
 			"aria-label",
 			`${tt("访问模式，当前：", "Access mode, current: ")}${meta.label}`,
@@ -889,7 +904,7 @@ export class DshChatView extends ItemView {
 			if (multiProvider) {
 				textCol.createDiv({ cls: "dshc-model-provider", text: m.provider });
 			}
-			item.createSpan({ cls: "dshc-item-check" }).innerHTML = ICON_CHECK;
+			item.createSpan({ cls: "dshc-item-check" }).append(svgIcon(ICON_CHECK));
 			const selected = m.provider === provider && m.id === model;
 			item.toggleClass("selected", selected);
 			item.setAttribute("aria-selected", selected ? "true" : "false");
@@ -980,7 +995,9 @@ export class DshChatView extends ItemView {
 	 */
 	private autosize(): void {
 		const ta = this.inputEl;
-		ta.style.height = "auto";
+		// No CSS `height` rule on .dsh-input, so removing the inline height is
+		// exactly `height: auto` — the collapsed state the measure needs.
+		ta.style.removeProperty("height");
 		ta.style.height = `${ta.scrollHeight}px`;
 	}
 
@@ -1007,7 +1024,7 @@ export class DshChatView extends ItemView {
 				title: label ?? tt("复制消息", "Copy message"),
 			},
 		});
-		btn.createSpan({ cls: "dshc-copy-icon" }).innerHTML = ICON_COPY;
+		btn.createSpan({ cls: "dshc-copy-icon" }).append(svgIcon(ICON_COPY));
 		if (label !== undefined) {
 			btn.createSpan({ cls: "dshc-copy-label", text: COPY_LABEL });
 		}
@@ -1061,8 +1078,9 @@ export class DshChatView extends ItemView {
 			attr: { style: "display:none", "data-state": "running" },
 		});
 		const rrow = entry.reasoningEl.createEl("summary", { cls: "dshc-discrow" });
-		rrow.createSpan({ cls: "dshc-leading" }).innerHTML =
-			span("dshc-ico", ICON_THINK) + span("dshc-chev", ICON_CHEVRON);
+		const rleading = rrow.createSpan({ cls: "dshc-leading" });
+		rleading.createSpan({ cls: "dshc-ico" }).append(svgIcon(ICON_THINK));
+		rleading.createSpan({ cls: "dshc-chev" }).append(svgIcon(ICON_CHEVRON));
 		rrow.createSpan({ cls: "dshc-title", text: "Think" });
 		rrow.createSpan({ cls: "dshc-sep" });
 		entry.reasoningSumEl = rrow.createSpan({ cls: "dshc-sum" });
@@ -1175,8 +1193,9 @@ export class DshChatView extends ItemView {
 			attr: { "data-state": "running" },
 		});
 		const row = details.createEl("summary", { cls: "dshc-discrow" });
-		row.createSpan({ cls: "dshc-leading" }).innerHTML =
-			span("dshc-ico", ICON_COMMAND) + span("dshc-chev", ICON_CHEVRON);
+		const leading = row.createSpan({ cls: "dshc-leading" });
+		leading.createSpan({ cls: "dshc-ico" }).append(svgIcon(ICON_COMMAND));
+		leading.createSpan({ cls: "dshc-chev" }).append(svgIcon(ICON_CHEVRON));
 		row.createSpan({ cls: "dshc-dot" });
 		row.createSpan({ cls: "dshc-title mono", text: name });
 		row.createSpan({ cls: "dshc-sep" });
@@ -1275,11 +1294,11 @@ export class DshChatView extends ItemView {
 	showBanner(info: string): void {
 		if (!this.bannerEl) return;
 		this.bannerEl.setText(`⚠️ dsh 已停止：${info}`);
-		this.bannerEl.removeAttribute("style");
+		this.bannerEl.removeClass("is-hidden");
 	}
 	private hideBanner(): void {
 		if (!this.bannerEl) return;
-		this.bannerEl.setAttribute("style", "display:none");
+		this.bannerEl.addClass("is-hidden");
 	}
 }
 
@@ -1339,8 +1358,7 @@ async function copyText(text: string): Promise<boolean> {
 	try {
 		const ta = document.createElement("textarea");
 		ta.value = text;
-		ta.style.position = "fixed";
-		ta.style.opacity = "0";
+		ta.addClass("dsh-clipboard-ghost");
 		document.body.appendChild(ta);
 		ta.select();
 		const ok = document.execCommand("copy");
