@@ -58,29 +58,13 @@ dsh --version
 
 ## 快速开始
 
-### 1 安装 dsh profile
+### 1 安装到 Obsidian
 
-**自动安装（推荐）**：插件启动时会检测桥接 profile。首次运行（或任何一次检测不到 profile 时）会弹窗，点击安装按钮即可——4 个配置文件会被写入 `~/.dsh/profiles/deepshian/`，其中 `cordis.patch.yml` 按本机真实用户目录生成，无需手动改路径。之后也可随时在**设置 → Reinstall bridge profile** 重新安装。
+**方式 A：插件商店搜索安装**
 
-**手动兜底**：复制 profile 目录，然后手动修正机器路径：
+打开 Obsidian → **设置 → 第三方插件 → 浏览** → 搜索 **deepshian** → **安装** → **启用**，然后点左侧栏 🤖 图标打开聊天。
 
-```powershell
-Copy-Item .\dsh-profile\deepshian\* "$env:USERPROFILE\.dsh\profiles\deepshian\" -Recurse -Force
-```
-
-把该目录下 `cordis.patch.yml` 里的 `file:///` 路径改成你的用户目录（仓库副本里是 `<YOUR-HOME>` 占位符）。
-
-冒烟验证——应输出 `{"t":"ready",...}` 后跟流式事件：
-
-```powershell
-'{"prompt":"Reply PONG"}' | dsh --profile deepshian
-```
-
-> profile 的 `cordis.patch.yml` 用 `file:///...mjs` 插入本地 cordis 插件，bundles 只含 `@deepseek-ai/dsh-base`（完整 Agent 内核），模型/凭据自动继承你的 dsh 配置。
-
-### 2 安装到 Obsidian
-
-**方式 A：从 Release 下载**
+**方式 B：从 Release 下载**
 
 到 [Releases 页面](https://github.com/zhenghaoyang24/obsidian-plugin-deepshian/releases) 下载最新版本的**三个文件**：
 
@@ -99,11 +83,7 @@ Copy-Item "$env:USERPROFILE\Downloads\main.js", "$env:USERPROFILE\Downloads\mani
 
 然后：**设置 → 第三方插件 → 启用 DeepShian** → 点左侧栏 🤖 图标打开聊天。
 
-**方式 B：插件商店搜索安装**
-
-打开 Obsidian → **设置 → 第三方插件 → 浏览** → 搜索 **deepshian** → **安装** → **启用**，然后点左侧栏 🤖 图标打开聊天。
-
-### 3 从源码构建（可选）
+### 2 从源码构建（可选）
 
 ```bash
 npm install
@@ -117,7 +97,7 @@ npm run dev       # 可选：watch 模式增量打包
 Copy-Item .\build\* "<vault>/.obsidian/plugins/deepshian/"
 ```
 
-### 4 插件设置
+### 3 插件设置
 
 | 设置                      | 默认值       | 说明                                             |
 | ------------------------- | ------------ | ------------------------------------------------ |

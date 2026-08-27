@@ -60,36 +60,13 @@ dsh --version
 
 ## Quick Start
 
-### 1 Install the dsh profile
+### 1 Install into Obsidian
 
-**Automatic (recommended):** the plugin checks the bridge profile on startup.
-The first run — or any run where the profile is missing — opens a dialog:
-click the install button and the four profile files are written to
-`~/.dsh/profiles/deepshian/`. `cordis.patch.yml` is generated with your
-machine's real home path, so nothing needs manual editing. You can also
-reinstall anytime from **Settings → Reinstall bridge profile**.
+**Option A: Install from the community plugin store**
 
-**Manual fallback:** copy the profile folder, then fix the machine path by
-hand:
+Open Obsidian → **Settings → Community plugins → Browse** → search **deepshian** → **Install** → **Enable**, then click the 🤖 icon in the left sidebar to open chat.
 
-```powershell
-Copy-Item .\dsh-profile\deepshian\* "$env:USERPROFILE\.dsh\profiles\deepshian\" -Recurse -Force
-```
-
-Edit `cordis.patch.yml` inside that directory so the `file:///` path points at
-your user home (the repo copy ships a `<YOUR-HOME>` placeholder).
-
-Smoke test — you should see `{"t":"ready",...}` followed by streaming events:
-
-```powershell
-'{"prompt":"Reply PONG"}' | dsh --profile deepshian
-```
-
-> The profile's `cordis.patch.yml` injects the local cordis plugin via `file:///...mjs`; the bundles only contain `@deepseek-ai/dsh-base` (the full agent core), and models/credentials are inherited from your own dsh config.
-
-### 2 Install into Obsidian
-
-**Option A: Download from Releases**
+**Option B: Download from Releases**
 
 Go to the [Releases page](https://github.com/zhenghaoyang24/obsidian-plugin-deepshian/releases) and download these **three files** from the latest release:
 
@@ -108,11 +85,7 @@ Copy-Item "$env:USERPROFILE\Downloads\main.js", "$env:USERPROFILE\Downloads\mani
 
 Then: **Settings → Community plugins → Enable DeepShian** → click the 🤖 icon in the left sidebar to open chat.
 
-**Option B: Install from the community plugin store**
-
-Open Obsidian → **Settings → Community plugins → Browse** → search **deepshian** → **Install** → **Enable**, then click the 🤖 icon in the left sidebar to open chat.
-
-### 3 Build from source (optional)
+### 2 Build from source (optional)
 
 ```bash
 npm install
@@ -126,7 +99,7 @@ The output lands in `build/` — the same three files (`main.js`, `manifest.json
 Copy-Item .\build\* "<vault>/.obsidian/plugins/deepshian/"
 ```
 
-### 4 Plugin settings
+### 3 Plugin settings
 
 | Setting             | Default       | Description                                      |
 | ------------------- | ------------- | ------------------------------------------------ |
