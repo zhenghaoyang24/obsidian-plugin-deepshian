@@ -1,5 +1,7 @@
 # DeepShian
 
+<img width="1858" height="1014" alt="image" src="https://github.com/user-attachments/assets/004b3af4-4b5b-4f6f-b920-cda4e7835df0" />
+
 English | [简体中文](README.zh.md)
 
 > Sidebar AI for Obsidian, powered by a local DeepSeek Harness
