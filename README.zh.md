@@ -66,9 +66,7 @@ dsh --version
 
 **方式 B：从 Release 下载**
 
-到 [Releases 页面](https://github.com/zhenghaoyang24/obsidian-plugin-deepshian/releases) 下载最新版本的三个文件`main.js`、`manifest.json`、`styles.css`。
-
-把它们放到 vault 的插件目录 `<vault>/.obsidian/plugins/deepshian/`。然后：**设置 → 第三方插件 → 启用 DeepShian** → 点左侧栏 🤖 图标打开聊天。
+到 [Releases 页面](https://github.com/zhenghaoyang24/obsidian-plugin-deepshian/releases) 下载最新版本的三个文件`main.js`、`manifest.json`、`styles.css`。把它们放到 vault 的插件目录 `<vault>/.obsidian/plugins/deepshian/`。然后：**设置 → 第三方插件 → 启用 DeepShian** → 点左侧栏 🤖 图标打开聊天。
 
 ### 2 从源码构建（可选）
 
@@ -77,7 +75,7 @@ npm install
 npm run build
 ```
 
-构建产物在 `build/`——同样是这三个文件（`main.js`、`manifest.json`、`styles.css`），复制到 vault 的插件目录即可：
+构建产物在 `build/`——同样是这三个文件（`main.js`、`manifest.json`、`styles.css`），复制到 vault 的插件目录即可。
 
 ### 3 插件设置
 
