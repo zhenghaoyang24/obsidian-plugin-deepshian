@@ -1,6 +1,7 @@
 import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
 import { DshBridge } from "./bridge";
 import { DshChatView, VIEW_TYPE_DSH_CHAT } from "./chat-view";
+import { applyLanguageSetting, t } from "./i18n";
 import { ProfileInstallModal } from "./install-modal";
 import { detectProfile, installProfile, patchPathHealthy, profileDir } from "./profile-install";
 import { DEFAULT_SETTINGS, DshSettingTab, DshSettings } from "./settings";
@@ -14,6 +15,9 @@ export default class DshBridgePlugin extends Plugin {
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
+		// Resolve zh/en (auto = follow the Obsidian language) before any string
+		// is rendered — commands, notices, and the settings tab all read it.
+		applyLanguageSetting(this.settings.language);
 
 		// 0.1.x defaulted to the "obsidian" bridge profile; carry old data forward.
 		if (this.settings.profile === "obsidian") {
@@ -33,11 +37,13 @@ export default class DshBridgePlugin extends Plugin {
 		const open = (): void => void this.activate(false);
 		const fresh = (): void => void this.activate(true);
 
-		this.addRibbonIcon("bot", "Open DSH chat", open);
-		this.addCommand({ id: "open-dsh-chat", name: "Open DSH chat", callback: open });
+		// Command/ribbon names are registered once per load; a language switch
+		// applies to them the next time the plugin loads.
+		this.addRibbonIcon("bot", t("打开 DSH 对话", "Open DSH chat"), open);
+		this.addCommand({ id: "open-dsh-chat", name: t("打开 DSH 对话", "Open DSH chat"), callback: open });
 		this.addCommand({
 			id: "new-dsh-chat",
-			name: "New DSH chat",
+			name: t("新建 DSH 对话", "New DSH chat"),
 			callback: () => void this.activate(true),
 		});
 
@@ -67,7 +73,7 @@ export default class DshBridgePlugin extends Plugin {
 			leaf = this.app.workspace.getRightLeaf(false);
 		}
 		if (!leaf) {
-			new Notice("DSH chat: cannot create a sidebar leaf");
+			new Notice(t("DSH 对话：无法创建侧边栏面板", "DSH chat: cannot create a sidebar leaf"));
 			return;
 		}
 		await leaf.setViewState({ type: VIEW_TYPE_DSH_CHAT, active: true });
@@ -128,9 +134,12 @@ export default class DshBridgePlugin extends Plugin {
 		if (detectProfile(name)) {
 			try {
 				installProfile(name);
-				new Notice("DeepShian: bridge profile 已修复");
+				new Notice(t("DeepShian: 桥接 profile 已修复", "DeepShian: bridge profile repaired"));
 			} catch (err) {
-				new Notice(`DeepShian: bridge profile 修复失败 — ${String(err)}`);
+				new Notice(
+					t("DeepShian: 桥接 profile 修复失败 — ", "DeepShian: failed to repair bridge profile — ") +
+						String(err),
+				);
 			}
 			return;
 		}
@@ -141,12 +150,20 @@ export default class DshBridgePlugin extends Plugin {
 	installProfileNow(): void {
 		try {
 			installProfile(this.settings.profile);
-			new Notice("DeepShian: bridge profile 已安装 ✓");
+			new Notice(t("DeepShian: 桥接 profile 已安装 ✓", "DeepShian: bridge profile installed ✓"));
 		} catch (err) {
 			new Notice(
-				`DeepShian: 安装失败 — ${String(err)}\n目标目录：${profileDir(this.settings.profile)}`,
+				`${t("DeepShian: 安装失败 — ", "DeepShian: installation failed — ")}${String(err)}\n` +
+					t("目标目录：", "Target directory: ") +
+					profileDir(this.settings.profile),
 			);
 		}
+	}
+
+	// -------------------------------------------------------------- language
+	/** Called by the settings tab after the language changes mid-session. */
+	onLanguageChanged(): void {
+		this.view?.relocalize();
 	}
 
 	// ------------------------------------------------------------ settings

@@ -4,52 +4,29 @@
 
 <img width="1858" height="1014" alt="image" src="https://github.com/user-attachments/assets/004b3af4-4b5b-4f6f-b920-cda4e7835df0" style="width: 100%; height: auto; display: block;" />
 
-English | [简体中文](README.zh.md)
+English | [简体中文](readme.zh.md)
 
 ![DSH](<https://img.shields.io/badge/Powered%20by-DeepSeek%20Harness-6366f1?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNS41di03bDUgMy41LTUgMy41eiIvPjwvc3ZnPg==>)
-![Version](https://img.shields.io/badge/version-0.2.0-22c55e?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.0.0-22c55e?style=flat-square)
 ![Obsidian](<https://img.shields.io/badge/Obsidian-Desktop%20Only-7c3aed?style=flat-square&logo=obsidian&logoColor=white>)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.4-blue?style=flat-square&logo=typescript&logoColor=white)
 
 DeepShian brings DeepSeek Harness into Obsidian's right sidebar. There is no cloud API: it talks to the `dsh` already installed on your machine, so you get the full agent experience — streaming answers, thinking steps, tool-call cards — and it can read and edit your vault files directly.
 
-DeepShian 把 DeepSeek Harness 直接带进 Obsidian 右侧栏。后端不是云端 API，而是你本机已经装好的 dsh，因此侧边栏里就是完整 Agent 体验——流式回答、思考过程、工具调用卡片——并且可以直接读写 vault 文件。
-
 ## Features
 
-### 🔒 Fully Local
-
-- Runs entirely on your machine: no cloud API, no account, and no vault data leaves your device.
-- The sidebar hosts the full agent — answers, tool calls, and file operations are all driven by your local `dsh`.
-
-### ✨ Model Picker
-
-- One click lists every model available in your local `dsh` setup; providers are grouped when you have several.
-- Your choice sticks across new conversations, restarts, and the dsh web app.
-
-### 🔐 Access Control
-
-- Pick an access mode next to the input box: **Read Only** (view and search only) or **Workspace Write** (edit files and run commands).
-- The mode is enforced for real — not a prompt hint — so you always decide what the agent may touch.
-
-### 💬 Conversations
-
-- The current conversation title is always shown; the 📋 **History** button opens a panel with every conversation saved in this workspace.
-- Click a past conversation to resume it with full context, tool calls included.
-- History is shared with the dsh web app — both sides see the same conversations.
-- **New conversation** restarts the agent for a fresh start.
-
-### 🎨 Chat Experience
-
-- Streamed replies render word by word; 💭 thinking steps are collapsible; tool calls appear as cards with input/output and status; token usage is shown at the end of every turn.
-- The send button turns into **Stop** while generating — click it to interrupt the current turn.
-- The UI follows Obsidian's language setting (English / 简体中文).
+- 🔒 Fully local: answers, tool calls, and file operations are all driven by your local `dsh`.
+- ✨ Model picker: choose any model, just like in dsh web.
+- 💬 Conversation sync: the DeepShian workspace syncs with dsh web, including conversation history, archive, and deletion.
+- 🔐 Access control: choose the agent's access mode like in dsh web — **Read Only** or **Workspace Write**.
+- 🎨 Chat experience: the same chat experience as dsh web, including streaming output, thinking steps, tool calls, and more.
+- 🌐 Multilingual: fully bilingual UI (中文 / English) that follows your Obsidian language.
 
 ## Requirements
 
 | Dependency            | Version   | Notes                                          |
 | --------------------- | --------- | ---------------------------------------------- |
-| **Obsidian**    | ≥ 1.4.0  | Desktop only                                   |
+| **Obsidian**    | ≥ 1.5.7  | Desktop only                                   |
 | **Node.js**     | ≥ 18     | Runtime for the `dsh` command                  |
 | **DeepSeek Harness** | /         | Installed globally so that `dsh` is available  |
 
@@ -68,9 +45,9 @@ Open Obsidian → **Settings → Community plugins → Browse** → search **dee
 
 **Option B: Download from Releases**
 
-Go to the [Releases page](https://github.com/zhenghaoyang24/obsidian-plugin-deepshian/releases) and download these three files** from the latest release: `main.js`、`manifest.json`、`styles.css`. Put them into the vault's plugin folder `<vault>/.obsidian/plugins/deepshian/`.Then: **Settings → Community plugins → Enable DeepShian** → click the 🤖 icon in the left sidebar to open chat.
+Go to the [Releases page](https://github.com/zhenghaoyang24/obsidian-plugin-deepshian/releases) and download these three files from the latest release: `main.js`, `manifest.json`, `styles.css`. Put them into the vault's plugin folder `<vault>/.obsidian/plugins/deepshian/`. Then: **Settings → Community plugins → Enable DeepShian** → click the 🤖 icon in the left sidebar to open chat.
 
-### 2 Build from source (optional)
+### 2 Build from source
 
 ```bash
 npm install
@@ -78,13 +55,33 @@ npm run build     # type-check and bundle into build/ (main.js + manifest.json +
 npm run dev       # optional: watch-mode incremental builds
 ```
 
-The output lands in `build/` — the same three files (`main.js`, `manifest.json`, `styles.css`) — copy them into the vault's plugin folder:
+The output lands in `build/` — the same three files (`main.js`, `manifest.json`, `styles.css`) — copy them into the vault's plugin folder.
 
 ### 3 Plugin settings
 
-| Setting             | Default       | Description                                      |
-| ------------------- | ------------- | ------------------------------------------------ |
-| **dsh command**     | `dsh`         | Full path if `dsh` is not on PATH                |
-| **Bridge profile**  | `deepshian`   | Profile that carries the JSONL bridge plugin (auto-installed on first run) |
-| **Start read-only** | Off           | New conversations open in read-only mode         |
-| **Debug logging**   | Off           | Log unparsed stdout lines and harness stderr to the console |
+| Setting                 | Default           | Description                                                                                                       |
+| ----------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **Plugin language**     | Auto              | UI language (settings page included): Auto follows Obsidian — Chinese for zh, English otherwise — or force 中文 / English |
+| **dsh command**         | `dsh`             | Full path if `dsh` is not on PATH                                                                                 |
+| **Bridge profile**      | `deepshian`       | Profile passed as `--profile`; auto-installed on first run                                                        |
+| **Reinstall bridge profile** | —          | Auto-installs on first run (dialog) or repairs the profile path on this machine (e.g. when dsh was installed after the plugin) |
+| **Start read-only**     | Off               | Every new sidebar starts in read-only mode                                                                        |
+| **On open**             | Start new conversation | Whether opening the sidebar starts a new conversation or resumes the most recent one for this vault          |
+| **Debug logging**       | Off               | Log unparsed stdout lines and harness stderr to the developer console                                              |
+
+## License
+
+This project is open source under the [MIT License](LICENSE).
+
+## Contributing
+
+Issues and Pull Requests are welcome.
+
+1. Fork the repository and create your feature branch (`git checkout -b feature/your-feature`).
+2. Commit your changes (`git commit -m 'feat: add some feature'`).
+3. Push to the branch (`git push origin feature/your-feature`).
+4. Open a Pull Request.
+
+---
+
+Powered by DeepSeek Harness.

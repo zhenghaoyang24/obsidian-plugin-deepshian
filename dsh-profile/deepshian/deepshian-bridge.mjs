@@ -28,6 +28,19 @@
 // same vault and you see one shared history. Etiquette: treat a session as
 // single-writer; switch ownership here before continuing it in dsh web.
 //
+// Workspace sync (both directions, all inside this bridge):
+//   - web -> plugin: the session listing matches the vault by canonical
+//     `fs.realpath` cwd (raw spelling first, canon second), so conversations
+//     dsh web created under the vault's workspace appear here even when the
+//     two surfaces spell the directory differently;
+//   - plugin -> web: every listing refresh folds this vault's unaccounted
+//     persisted sessions into a vault-named workspace record inside the
+//     shared `$DSH_HOME/storages/workspace.json` domain file (the same file
+//     web's registry persists), so web groups them under a workspace titled
+//     after the vault root. Web sees new records on its next host start; a
+//     running web host may republish over this write and the next refresh
+//     re-applies it idempotently.
+//
 // A session is minted LAZILY, only when the first real prompt is sent: booting
 // the bridge, opening the sidebar, or clicking "new chat" never registers an
 // empty conversation in the shared session store. The process keeps multi-turn
@@ -38,8 +51,8 @@
 
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
+import { readFile, realpath, rename, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { installModelSelection } from "@deepseek-ai/dsh-agent";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
@@ -79,6 +92,132 @@ function toMillis(value) {
     return Number.isNaN(ms) ? null : ms;
   }
   return null;
+}
+
+/**
+ * Memoizing `fs.realpath` wrapper — the workspace identity canon used by BOTH
+ * directions of vault/web sync. dsh web canonicalizes every directory through
+ * `fs.realpath` (drive-letter case, short names, symlinks, trailing
+ * separators all collapse), while Obsidian hands the bridge its own basePath
+ * spelling; comparing raw strings is exactly what broke cross-surface
+ * session visibility. A failed realpath resolves to `null` so callers can
+ * fall back to raw equality instead of failing the listing.
+ */
+function makeCanonicalResolver() {
+  const cache = new Map();
+  return async (path) => {
+    const key = String(path);
+    if (cache.has(key)) return cache.get(key);
+    const canon = await realpath(key).catch(() => null);
+    cache.set(key, canon);
+    return canon;
+  };
+}
+
+/**
+ * Workspace-sync core (pure apart from the injected `resolve`): idempotently
+ * fold one vault directory into a workspace-registry document — the same
+ * `workspace.json` domain dsh web persists — so conversations driven from
+ * this bridge appear in web under a workspace named after the vault root,
+ * mirroring web's own bootstrap naming (`basename(path)`).
+ *
+ * Web semantics mirrored exactly:
+ *   - one workspace per canonical directory path; an existing record is
+ *     reused and never retitled (`createCanonical` behavior);
+ *   - a new record is PREPENDED to `global.workspaceIds` (registry `create`
+ *     order) and its id must always sit in that order (registry validation
+ *     rejects any table row missing from it);
+ *   - only sessions accounted by NO workspace are adopted (bootstrap rule);
+ *     accounting and the archive set are orthogonal layers, so archived ids
+ *     stay adoptable and an unarchive restores the position;
+ *   - `initialized` is never flipped here: when the registry has not
+ *     bootstrapped yet, web's own startup bootstrap merges this record by
+ *     canonical path;
+ *   - adoption short-circuits while a registry `pendingMutation` marker is
+ *     present, so a crashed web-side operation is never fought; the next
+ *     listing refresh retries.
+ *
+ * Returns true when the document changed and must be re-published.
+ */
+async function adoptVaultWorkspace(doc, vaultCanon, rows, resolve, nowIso) {
+  const global = doc?.global;
+  if (!global || typeof global !== "object") return false;
+  if (global.pendingMutation && typeof global.pendingMutation === "object") return false;
+  const records = doc.tables?.workspaces;
+  if (!records || typeof records !== "object" || Array.isArray(records)) return false;
+
+  // sessionId -> workspaceId, first writer wins; duplicate accounting in the
+  // input is pre-existing corruption this fold must not amplify.
+  const accounted = new Map();
+  for (const [wsId, rec] of Object.entries(records)) {
+    if (!rec || typeof rec !== "object") continue;
+    const ids = Array.isArray(rec.sessionIds) ? rec.sessionIds : [];
+    for (const sid of ids) {
+      const key = String(sid);
+      if (!accounted.has(key)) accounted.set(key, wsId);
+    }
+  }
+
+  let changed = false;
+  let wsId = null;
+  let record = null;
+  for (const [id, rec] of Object.entries(records)) {
+    if (!rec || typeof rec !== "object") continue;
+    if (typeof rec.path !== "string" || rec.path === "") continue;
+    if ((await resolve(rec.path)) === vaultCanon) {
+      wsId = id;
+      record = rec;
+      break;
+    }
+  }
+  if (!wsId) {
+    wsId = randomUUID();
+    record = {
+      path: vaultCanon,
+      title: basename(vaultCanon),
+      sessionIds: [],
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+    records[wsId] = record;
+    changed = true;
+  }
+  // Order invariant: every table row must sit in workspaceIds or web's
+  // startup validation fails loud.
+  if (!Array.isArray(global.workspaceIds)) global.workspaceIds = [];
+  if (!global.workspaceIds.some((x) => String(x) === wsId)) {
+    global.workspaceIds.unshift(wsId);
+    changed = true;
+  }
+  if (!Array.isArray(record.sessionIds)) record.sessionIds = [];
+
+  const candidates = [];
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const id = r?.header?.id;
+    const cwd = r?.header?.cwd;
+    if (r?.persisted !== true) continue;
+    if (typeof id !== "string" || id === "") continue;
+    if (typeof cwd !== "string" || cwd === "") continue;
+    if (accounted.has(id)) continue;
+    if (cwd === vaultCanon || (await resolve(cwd)) === vaultCanon) candidates.push(r);
+  }
+  if (candidates.length > 0) {
+    candidates.sort(
+      (a, b) =>
+        (toMillis(b.header.createdAt) ?? 0) - (toMillis(a.header.createdAt) ?? 0) ||
+        String(a.header.id).localeCompare(String(b.header.id)),
+    );
+    const known = new Set(record.sessionIds.map(String));
+    const adopt = candidates.map((r) => String(r.header.id)).filter((id) => !known.has(id));
+    if (adopt.length > 0) {
+      // Newest first, prepended — same position convention as web's
+      // `attachSession`, so display order stays "newest at top".
+      record.sessionIds = [...adopt, ...record.sessionIds.map(String)];
+      record.updatedAt = nowIso;
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 /** Map one streaming session event onto the flat JSONL protocol. */
@@ -401,22 +540,101 @@ async function run(ctx) {
     await archiveViaFile(wanted);
   }
 
+  /**
+   * Vault -> web workspace sync driver: read the shared workspace registry
+   * file, fold this vault's unaccounted persisted sessions into the
+   * vault-named workspace, and republish atomically — the exact file and
+   * format dsh web maintains. Best-effort: every failure is swallowed
+   * (debug-visible) so listing never breaks. Web picks the result up on its
+   * next host start; a running web host keeps its in-memory snapshot and may
+   * republish over this write, which the next idempotent run re-applies.
+   */
+  async function syncVaultWorkspace(rows) {
+    if (!sessionQuery) return false;
+    const file = workspaceStateFile();
+    let text = null;
+    try {
+      text = await readFile(file, "utf8");
+    } catch (err) {
+      if (err?.code !== "ENOENT") throw err;
+    }
+    let doc;
+    if (text == null) {
+      // Same initial shape the file-based archive path mints.
+      doc = {
+        unit: { name: "workspace", version: 2 },
+        global: { initialized: false, workspaceIds: [], archivedSessionIds: [] },
+        tables: { workspaces: {} },
+      };
+    } else {
+      doc = JSON.parse(text);
+      if (doc?.unit?.name !== "workspace" || doc?.unit?.version !== 2) {
+        if (DEBUG) emit({ t: "dbg", type: "workspace_sync_skipped", data: "foreign workspace.json unit header" });
+        return false;
+      }
+    }
+    if (!doc.global || typeof doc.global !== "object") {
+      doc.global = { initialized: false, workspaceIds: [], archivedSessionIds: [] };
+    }
+    if (!Array.isArray(doc.global.workspaceIds)) doc.global.workspaceIds = [];
+    if (!Array.isArray(doc.global.archivedSessionIds)) doc.global.archivedSessionIds = [];
+    if (!doc.tables || typeof doc.tables !== "object" || Array.isArray(doc.tables)) doc.tables = {};
+    if (
+      !doc.tables.workspaces ||
+      typeof doc.tables.workspaces !== "object" ||
+      Array.isArray(doc.tables.workspaces)
+    ) {
+      doc.tables.workspaces = {};
+    }
+
+    const resolve = makeCanonicalResolver();
+    const vaultCanon = await resolve(process.cwd());
+    if (vaultCanon == null) return false; // vault directory not resolvable right now
+
+    let all = rows;
+    if (!Array.isArray(all)) all = await sessionQuery.listSessions();
+
+    const changed = await adoptVaultWorkspace(doc, vaultCanon, all, resolve, new Date().toISOString());
+    if (!changed) return false;
+
+    const tmp = `${file}.${process.pid}.tmp`;
+    await writeFile(tmp, JSON.stringify(doc, null, 2) + "\n", "utf8");
+    await rename(tmp, file);
+    if (DEBUG) emit({ t: "dbg", type: "workspace_synced", data: vaultCanon });
+    return true;
+  }
+
   async function sendSessions(archivedId) {
     const out = [];
     const archived = await readArchivedIds();
     if (sessionQuery) {
       const all = await sessionQuery.listSessions();
-      const mine = all
-        .filter(
-          (r) =>
-            r.header?.cwd === process.cwd() &&
-            r.persisted === true &&
-            !archived.has(String(r.header.id)),
-        )
-        .slice(0, 60);
-      if (mine.length > 0) {
+      // Fold this vault's unaccounted sessions into the shared workspace
+      // registry BEFORE listing (best-effort; failures never break listing).
+      try {
+        await syncVaultWorkspace(all);
+      } catch (err) {
+        if (DEBUG) emit({ t: "dbg", type: "workspace_sync_failed", data: String(err?.message ?? err) });
+      }
+      // Vault-membership test: raw equality first (the bridge's own cwd
+      // spelling), then the canonical `fs.realpath` canon so conversations
+      // dsh web created under the vault's workspace stay visible even when
+      // the two surfaces spell the same directory differently.
+      const resolve = makeCanonicalResolver();
+      const vaultCanon = await resolve(process.cwd());
+      const mine = [];
+      for (const r of all) {
+        const cwd = r?.header?.cwd;
+        if (typeof cwd !== "string" || cwd === "") continue;
+        if (cwd !== process.cwd() && !(vaultCanon != null && (await resolve(cwd)) === vaultCanon)) continue;
+        if (r.persisted !== true) continue;
+        if (archived.has(String(r.header.id))) continue;
+        mine.push(r);
+      }
+      const capped = mine.slice(0, 60);
+      if (capped.length > 0) {
         // Public face on the mounted engine; folds the newest session/title per id.
-        const titled = await sessionQuery.readTitleSnapshots(mine.map((r) => r.header.id));
+        const titled = await sessionQuery.readTitleSnapshots(capped.map((r) => r.header.id));
         for (const row of titled) {
           if (row?.status !== "fulfilled") continue;
           out.push({
@@ -754,6 +972,9 @@ async function run(ctx) {
     quitWhenIdle();
   });
 }
+
+/** Exported for tests: the pure workspace-registry adoption fold. */
+export { adoptVaultWorkspace };
 
 export function apply(ctx) {
   run(ctx).catch((err) => {

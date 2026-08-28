@@ -1,4 +1,7 @@
 import { ItemView, MarkdownRenderer, Notice } from "obsidian";
+// `tt(zh, en)` resolves against the live locale (i18n module), so strings
+// rendered after a language switch come out in the new language immediately.
+import { t as tt } from "./i18n";
 import type DshBridgePlugin from "./main";
 import type {
 	BridgeStatus,
@@ -11,21 +14,6 @@ import type {
 } from "./types";
 
 export const VIEW_TYPE_DSH_CHAT = "dsh-chat-view";
-
-declare const moment: { locale(): string };
-
-/** True when the Obsidian UI runs with a Chinese locale (drives product copy). */
-const ZH = (() => {
-	try {
-		return moment.locale().toLowerCase().startsWith("zh");
-	} catch {
-		return false;
-	}
-})();
-
-function tt(zh: string, en: string): string {
-	return ZH ? zh : en;
-}
 
 interface ToolEntry {
 	callId: string;
@@ -72,33 +60,40 @@ type Entry = AssistantEntry | UserEntry;
 const RENDER_THROTTLE_MS = 120;
 
 /** Per-mode labels/descriptions follow the dsh web permission-preset wording. */
-const MODE_META: Record<ChatMode, { label: string; title: string }> = {
-	readonly: {
-		label: "Read Only",
-		title: tt(
-			"仅查看：读取文件、检索工作区，不做任何修改。",
-			"Inspect only: read files and search the workspace; nothing is modified.",
-		),
-	},
-	writable: {
-		label: "Workspace Write",
-		title: tt(
-			"允许在工作区内写入文件并执行命令。",
-			"Write inside the workspace and permitted temporary directories.",
-		),
-	},
-};
+function modeMeta(mode: ChatMode): { label: string; title: string } {
+	return mode === "readonly"
+		? {
+				label: tt("仅查看", "Read Only"),
+				title: tt(
+					"仅查看：读取文件、检索工作区，不做任何修改。",
+					"Inspect only: read files and search the workspace; nothing is modified.",
+				),
+			}
+		: {
+				label: tt("工作区写入", "Workspace Write"),
+				title: tt(
+					"允许在工作区内写入文件并执行命令。",
+					"Write inside the workspace and permitted temporary directories.",
+				),
+			};
+}
 
 /** Compact localized words for the header status chip (no model name here). */
-const STATUS_TEXT: Record<BridgeStatus, string> = {
-	stopped: tt("已停止", "stopped"),
-	connecting: tt("连接中…", "connecting"),
-	ready: tt("就绪", "ready"),
-	running: tt("生成中…", "running"),
-};
+function statusText(status: BridgeStatus): string {
+	switch (status) {
+		case "stopped":
+			return tt("已停止", "stopped");
+		case "connecting":
+			return tt("连接中…", "connecting");
+		case "ready":
+			return tt("就绪", "ready");
+		case "running":
+			return tt("生成中…", "running");
+	}
+}
 
-/** Copy button label; captured once so the "Copied" flash can restore it. */
-const COPY_LABEL = tt("复制", "Copy");
+/** Copy button label; re-evaluated so a language switch is picked up live. */
+const copyLabel = (): string => tt("复制", "Copy");
 
 /* Minimal inline SVGs copied from the dsh web frontend primitives bundle so the
  * sidebar matches the harness UI pixel-for-pixel. */
@@ -260,6 +255,11 @@ export class DshChatView extends ItemView {
 	private historyBtn!: HTMLButtonElement;
 	private historyPanelEl!: HTMLElement;
 	private historyListEl!: HTMLElement;
+	/** Chrome labels re-painted by relocalize() after a language switch. */
+	private newChatBtn!: HTMLButtonElement;
+	private newChatLabelEl!: HTMLElement;
+	private historyTitleEl!: HTMLElement;
+	private historyFootEl!: HTMLElement;
 	private modelWrapEl!: HTMLElement;
 	private modelBtn!: HTMLButtonElement;
 	private modelBtnLabel!: HTMLElement;
@@ -275,7 +275,7 @@ export class DshChatView extends ItemView {
 		return VIEW_TYPE_DSH_CHAT;
 	}
 	getDisplayText(): string {
-		return "DSH chat";
+		return tt("DSH 对话", "DSH chat");
 	}
 	getIcon(): string {
 		return "bot";
@@ -313,6 +313,39 @@ export class DshChatView extends ItemView {
 		this.stopClock();
 		document.removeEventListener("pointerdown", this.onDocPointerDown);
 		this.plugin.unbindView(this);
+	}
+
+	/**
+	 * Re-paint locale-dependent chrome after a language switch (settings tab →
+	 * plugin.onLanguageChanged). Never touches conversation entries, so it is
+	 * safe mid-turn; already-rendered messages keep their original language and
+	 * anything rendered afterwards uses the new one.
+	 */
+	relocalize(): void {
+		if (!this.headerEl) return; // view not built yet; onOpen will localize
+		this.historyBtn.setAttribute("aria-label", tt("历史会话", "Session history"));
+		this.newChatBtn.setAttribute("aria-label", tt("新会话", "New session"));
+		this.newChatLabelEl.setText(tt("新会话", "New session"));
+		this.historyTitleEl.setText(tt("历史会话", "Session history"));
+		this.historyFootEl.setText(
+			tt(
+				"会话与 dsh web 共享同一存储，归档双向同步；同一会话请避免两端同时使用。",
+				"Sessions share storage with dsh web, archiving syncs both ways; use one surface at a time.",
+			),
+		);
+		this.inputEl.setAttribute(
+			"placeholder",
+			tt("向 DeepShian 描述你想完成的事情…", "Describe what you want DeepShian to accomplish…"),
+		);
+		for (const item of Array.from(this.modeMenuEl.children) as HTMLElement[]) {
+			const value = item.getAttribute("data-value") as ChatMode | null;
+			if (!value) continue;
+			item.querySelector<HTMLElement>(".dshc-item-label")?.setText(modeMeta(value).label);
+		}
+		this.applyMode();
+		this.renderHeaderTitle();
+		this.renderSessions();
+		this.renderStatus();
 	}
 
 	// ------------------------------------------------------------- external
@@ -477,8 +510,8 @@ export class DshChatView extends ItemView {
 		this.autosize();
 		this.renderStatus();
 		if (!this.plugin.sendPrompt(text, this.mode)) {
-			entry.text = `⚠️ 未发送（dsh 进程未运行）: ${text}`;
-			new Notice("DSH bridge not running");
+			entry.text = `⚠️ ${tt("未发送（dsh 进程未运行）：", "Not sent (dsh process is not running): ")}${text}`;
+			new Notice(tt("DSH 桥接未运行", "DSH bridge not running"));
 		}
 		this.scrollBottom();
 	}
@@ -580,13 +613,16 @@ export class DshChatView extends ItemView {
 		});
 
 		// Explicit labeled pill — unmistakable entry point for a fresh conversation.
-		const newChat = this.headerEl.createEl("button", {
+		this.newChatBtn = this.headerEl.createEl("button", {
 			cls: "dsh-newchat-btn",
 			attr: { type: "button", "aria-label": tt("新会话", "New session") },
 		});
-		newChat.createSpan({ cls: "dsh-newchat-icon" }).append(svgIcon(ICON_PLUS));
-		newChat.createSpan({ cls: "dsh-newchat-label", text: tt("新会话", "New session") });
-		newChat.addEventListener("click", () => this.startNewChat());
+		this.newChatBtn.createSpan({ cls: "dsh-newchat-icon" }).append(svgIcon(ICON_PLUS));
+		this.newChatLabelEl = this.newChatBtn.createSpan({
+			cls: "dsh-newchat-label",
+			text: tt("新会话", "New session"),
+		});
+		this.newChatBtn.addEventListener("click", () => this.startNewChat());
 	}
 
 	/** Dropdown panel listing this workspace's persisted sessions. */
@@ -595,12 +631,12 @@ export class DshChatView extends ItemView {
 			cls: "dshc-history",
 			attr: { hidden: "" },
 		});
-		this.historyPanelEl.createDiv({
+		this.historyTitleEl = this.historyPanelEl.createDiv({
 			cls: "dshc-history-title",
 			text: tt("历史会话", "Session history"),
 		});
 		this.historyListEl = this.historyPanelEl.createDiv({ cls: "dshc-history-list" });
-		this.historyPanelEl.createDiv({
+		this.historyFootEl = this.historyPanelEl.createDiv({
 			cls: "dshc-history-foot",
 			text: tt(
 				"会话与 dsh web 共享同一存储，归档双向同步；同一会话请避免两端同时使用。",
@@ -773,7 +809,7 @@ export class DshChatView extends ItemView {
 			item.createSpan({ cls: "dshc-item-icon" }).append(
 				svgIcon(value === "readonly" ? ICON_MODE_READONLY : ICON_MODE_WRITE),
 			);
-			item.createSpan({ cls: "dshc-item-label", text: MODE_META[value].label });
+			item.createSpan({ cls: "dshc-item-label", text: modeMeta(value).label });
 			item.createSpan({ cls: "dshc-item-check" }).append(svgIcon(ICON_CHECK));
 			item.addEventListener("click", () => {
 				if (this.mode !== value) {
@@ -830,7 +866,7 @@ export class DshChatView extends ItemView {
 
 	/** Reflect the active mode into trigger label/icon/menu selection state. */
 	private applyMode(): void {
-		const meta = MODE_META[this.mode];
+		const meta = modeMeta(this.mode);
 		this.modeTriggerLabel.setText(meta.label);
 		this.modeTriggerIcon.replaceChildren(
 			svgIcon(this.mode === "readonly" ? ICON_MODE_READONLY : ICON_MODE_WRITE),
@@ -1005,7 +1041,7 @@ export class DshChatView extends ItemView {
 		const row = this.columnEl.createDiv({ cls: "dshc-userrow" });
 		const bubble = row.createDiv({ cls: "dshc-bubble" });
 		bubble.setText(entry.text);
-		this.buildCopyButton(row, () => entry.text, COPY_LABEL);
+		this.buildCopyButton(row, () => entry.text, copyLabel());
 		this.scrollBottom();
 	}
 
@@ -1026,7 +1062,7 @@ export class DshChatView extends ItemView {
 		});
 		btn.createSpan({ cls: "dshc-copy-icon" }).append(svgIcon(ICON_COPY));
 		if (label !== undefined) {
-			btn.createSpan({ cls: "dshc-copy-label", text: COPY_LABEL });
+			btn.createSpan({ cls: "dshc-copy-label", text: copyLabel() });
 		}
 		btn.addEventListener("click", () => {
 			void this.handleCopy(btn, getText());
@@ -1047,7 +1083,7 @@ export class DshChatView extends ItemView {
 		if (label) label.setText(tt("已复制", "Copied"));
 		window.setTimeout(() => {
 			btn.removeClass("copied");
-			if (label) label.setText(COPY_LABEL);
+			if (label) label.setText(copyLabel());
 		}, 1500);
 	}
 
@@ -1096,7 +1132,7 @@ export class DshChatView extends ItemView {
 		this.buildCopyButton(foot, () => {
 			const text = entry.text.trim();
 			return text !== "" ? text : (entry.error ?? "");
-		}, COPY_LABEL);
+		}, copyLabel());
 		entry.usageEl = foot.createDiv({ cls: "dshc-usage" });
 
 		this.entries.push(entry);
@@ -1257,7 +1293,7 @@ export class DshChatView extends ItemView {
 	private renderStatus(info?: string): void {
 		const status = this.plugin.bridgeStatus();
 		// The chip is a pure status word now; the header title carries the identity.
-		this.statusChip.setText(STATUS_TEXT[status] ?? status);
+		this.statusChip.setText(statusText(status));
 		this.statusChip.setAttr("data-status", status);
 
 		const running = status === "running" || this.currentAssistant !== null;
@@ -1293,7 +1329,7 @@ export class DshChatView extends ItemView {
 
 	showBanner(info: string): void {
 		if (!this.bannerEl) return;
-		this.bannerEl.setText(`⚠️ dsh 已停止：${info}`);
+		this.bannerEl.setText(`⚠️ ${tt("dsh 已停止：", "dsh stopped: ")}${info}`);
 		this.bannerEl.removeClass("is-hidden");
 	}
 	private hideBanner(): void {
