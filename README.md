@@ -68,22 +68,7 @@ Open Obsidian → **Settings → Community plugins → Browse** → search **dee
 
 **Option B: Download from Releases**
 
-Go to the [Releases page](https://github.com/zhenghaoyang24/obsidian-plugin-deepshian/releases) and download these **three files** from the latest release:
-
-| File             | Purpose                                 |
-| ---------------- | --------------------------------------- |
-| `main.js`        | Plugin main program                     |
-| `manifest.json`  | Plugin manifest (id / version / description) |
-| `styles.css`     | Plugin styles                           |
-
-Put them into the vault's plugin folder `<vault>/.obsidian/plugins/deepshian/` (create it first if needed):
-
-```powershell
-New-Item -ItemType Directory -Force "<vault>/.obsidian/plugins/deepshian/" | Out-Null
-Copy-Item "$env:USERPROFILE\Downloads\main.js", "$env:USERPROFILE\Downloads\manifest.json", "$env:USERPROFILE\Downloads\styles.css" "<vault>/.obsidian/plugins/deepshian/"
-```
-
-Then: **Settings → Community plugins → Enable DeepShian** → click the 🤖 icon in the left sidebar to open chat.
+Go to the [Releases page](https://github.com/zhenghaoyang24/obsidian-plugin-deepshian/releases) and download these three files** from the latest release: `main.js`、`manifest.json`、`styles.css`. Put them into the vault's plugin folder `<vault>/.obsidian/plugins/deepshian/`.Then: **Settings → Community plugins → Enable DeepShian** → click the 🤖 icon in the left sidebar to open chat.
 
 ### 2 Build from source (optional)
 
@@ -94,10 +79,6 @@ npm run dev       # optional: watch-mode incremental builds
 ```
 
 The output lands in `build/` — the same three files (`main.js`, `manifest.json`, `styles.css`) — copy them into the vault's plugin folder:
-
-```powershell
-Copy-Item .\build\* "<vault>/.obsidian/plugins/deepshian/"
-```
 
 ### 3 Plugin settings
 
