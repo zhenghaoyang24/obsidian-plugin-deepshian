@@ -10,7 +10,7 @@
 ![Obsidian](<https://img.shields.io/badge/Obsidian-Desktop%20Only-7c3aed?style=flat-square&logo=obsidian&logoColor=white>)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.4-blue?style=flat-square&logo=typescript&logoColor=white)
 
-DeepShian 把 DeepSeek Harness 直接带进 Obsidian 右侧栏。后端不是云端 API，而是你本机已经装好的 `dsh`，因此侧边栏里就是完整 Agent 体验——流式回答、思考过程、工具调用卡片——并且可以直接读写 vault 文件。
+DeepShian 把 [DeepSeek Harness](https://www.deepseek.com/harness/) 直接带进 Obsidian 右侧栏。后端不是云端 API，而是你本机已经装好的 `dsh`，因此侧边栏里就是完整 Agent 体验——流式回答、思考过程、工具调用卡片——并且可以直接读写 vault 文件。
 
 ## 功能
 

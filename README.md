@@ -4,13 +4,13 @@
 
 <img width="1858" height="1014" alt="image" src="https://github.com/user-attachments/assets/004b3af4-4b5b-4f6f-b920-cda4e7835df0" style="width: 100%; height: auto; display: block;" />
 
-English | [简体中文](readme.zh.md)
+English | [简体中文](README.zh.md)
 
 ![DSH](<https://img.shields.io/badge/Powered%20by-DeepSeek%20Harness-6366f1?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNS41di03bDUgMy41LTUgMy41eiIvPjwvc3ZnPg==>)
 ![Obsidian](<https://img.shields.io/badge/Obsidian-Desktop%20Only-7c3aed?style=flat-square&logo=obsidian&logoColor=white>)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.4-blue?style=flat-square&logo=typescript&logoColor=white)
 
-DeepShian brings DeepSeek Harness into Obsidian's right sidebar. There is no cloud API: it talks to the `dsh` already installed on your machine, so you get the full agent experience — streaming answers, thinking steps, tool-call cards — and it can read and edit your vault files directly.
+DeepShian brings [DeepSeek Harness](https://www.deepseek.com/harness/) into Obsidian's right sidebar. There is no cloud API: it talks to the `dsh` already installed on your machine, so you get the full agent experience — streaming answers, thinking steps, tool-call cards — and it can read and edit your vault files directly.
 
 ## Features
 
