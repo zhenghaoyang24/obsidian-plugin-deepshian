@@ -66,36 +66,18 @@ dsh --version
 
 **方式 B：从 Release 下载**
 
-到 [Releases 页面](https://github.com/zhenghaoyang24/obsidian-plugin-deepshian/releases) 下载最新版本的**三个文件**：
+到 [Releases 页面](https://github.com/zhenghaoyang24/obsidian-plugin-deepshian/releases) 下载最新版本的三个文件`main.js`、`manifest.json`、`styles.css`。
 
-| 文件             | 说明                           |
-| ---------------- | ------------------------------ |
-| `main.js`        | 插件主程序                     |
-| `manifest.json`  | 插件清单（id / 版本 / 描述等） |
-| `styles.css`     | 插件界面样式                   |
-
-把它们放到 vault 的插件目录 `<vault>/.obsidian/plugins/deepshian/`（目录不存在则先创建）：
-
-```powershell
-New-Item -ItemType Directory -Force "<vault>/.obsidian/plugins/deepshian/" | Out-Null
-Copy-Item "$env:USERPROFILE\Downloads\main.js", "$env:USERPROFILE\Downloads\manifest.json", "$env:USERPROFILE\Downloads\styles.css" "<vault>/.obsidian/plugins/deepshian/"
-```
-
-然后：**设置 → 第三方插件 → 启用 DeepShian** → 点左侧栏 🤖 图标打开聊天。
+把它们放到 vault 的插件目录 `<vault>/.obsidian/plugins/deepshian/`。然后：**设置 → 第三方插件 → 启用 DeepShian** → 点左侧栏 🤖 图标打开聊天。
 
 ### 2 从源码构建（可选）
 
 ```bash
 npm install
-npm run build     # 类型检查 + 打包到 build/（main.js + manifest.json + styles.css）
-npm run dev       # 可选：watch 模式增量打包
+npm run build
 ```
 
 构建产物在 `build/`——同样是这三个文件（`main.js`、`manifest.json`、`styles.css`），复制到 vault 的插件目录即可：
-
-```powershell
-Copy-Item .\build\* "<vault>/.obsidian/plugins/deepshian/"
-```
 
 ### 3 插件设置
 
