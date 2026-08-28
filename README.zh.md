@@ -1,10 +1,10 @@
-# DeepShian
+<p align="center">
+  <span style="font-size: 2em; font-weight: bold;"><span style="color: white;">Deep</span><span style="color: #7c3aed;">Shian</span></span>
+</p>
 
-<img width="1858" height="1014" alt="image" src="https://github.com/user-attachments/assets/928c02f6-25c5-487b-a105-0cf65391ebfc" />
+<img width="1858" height="1014" alt="image" src="https://github.com/user-attachments/assets/928c02f6-25c5-487b-a105-0cf65391ebfc" style="width: 100%; height: auto; display: block;" />
 
 [English](README.md) | 简体中文
-
-> Obsidian 侧边栏 AI —— 本地 DeepSeek Harness 驱动
 
 ![DSH](<https://img.shields.io/badge/Powered%20by-DeepSeek%20Harness-6366f1?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNS41di03bDUgMy41LTUgMy41eiIvPjwvc3ZnPg==>)
 ![Version](https://img.shields.io/badge/version-0.2.0-22c55e?style=flat-square)

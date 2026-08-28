@@ -1,10 +1,10 @@
-# DeepShian
+<p align="center">
+  <span style="font-size: 2em; font-weight: bold;"><span style="color: white;">Deep</span><span style="color: #7c3aed;">Shian</span></span>
+</p>
 
-<img width="1858" height="1014" alt="image" src="https://github.com/user-attachments/assets/004b3af4-4b5b-4f6f-b920-cda4e7835df0" />
+<img width="1858" height="1014" alt="image" src="https://github.com/user-attachments/assets/004b3af4-4b5b-4f6f-b920-cda4e7835df0" style="width: 100%; height: auto; display: block;" />
 
 English | [简体中文](README.zh.md)
-
-> Sidebar AI for Obsidian, powered by a local DeepSeek Harness
 
 ![DSH](<https://img.shields.io/badge/Powered%20by-DeepSeek%20Harness-6366f1?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNS41di03bDUgMy41LTUgMy41eiIvPjwvc3ZnPg==>)
 ![Version](https://img.shields.io/badge/version-0.2.0-22c55e?style=flat-square)
