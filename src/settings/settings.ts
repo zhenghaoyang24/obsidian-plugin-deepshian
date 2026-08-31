@@ -1,5 +1,5 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
-import { applyLanguageSetting, t, type LanguageSetting, type Locale } from "../i18n";
+import { applyLanguageSetting, t, type LanguageSetting } from "../i18n";
 import type DshBridgePlugin from "../main";
 import { profileDir } from "../profile/install";
 
@@ -27,7 +27,10 @@ export const DEFAULT_SETTINGS: DshSettings = {
 };
 
 export class DshSettingTab extends PluginSettingTab {
-  constructor(app: App, private plugin: DshBridgePlugin) {
+  constructor(
+    app: App,
+    private plugin: DshBridgePlugin,
+  ) {
     super(app, plugin);
   }
 
@@ -51,8 +54,7 @@ export class DshSettingTab extends PluginSettingTab {
           .addOption("en", "English")
           .setValue(this.plugin.settings.language)
           .onChange(async (v) => {
-            const language: LanguageSetting =
-              v === "zh" || v === "en" ? (v as Locale) : "auto";
+            const language: LanguageSetting = v === "zh" || v === "en" ? v : "auto";
             this.plugin.settings.language = language;
             await this.plugin.saveSettings();
             // Re-resolve the effective locale, then repaint this tab and

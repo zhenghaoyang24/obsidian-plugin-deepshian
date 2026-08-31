@@ -19,8 +19,8 @@ import type { ReplayTurn } from "../bridge/types";
 export class ChatConversation {
   private entries: Entry[] = [];
   private currentAssistant: AssistantEntry | null = null;
-  private renderTimer: ReturnType<typeof setTimeout> | null = null;
-  private clockTimer: ReturnType<typeof setInterval> | null = null;
+  private renderTimer: number | null = null;
+  private clockTimer: number | null = null;
   private turnStartedAt = 0;
 
   private messagesEl!: HTMLElement;
@@ -52,7 +52,7 @@ export class ChatConversation {
 
   /** Cancel timers; called from the view's onClose. */
   dispose(): void {
-    if (this.renderTimer != null) clearTimeout(this.renderTimer);
+    if (this.renderTimer != null) window.clearTimeout(this.renderTimer);
     this.renderTimer = null;
     this.stopClock();
   }
@@ -261,7 +261,7 @@ export class ChatConversation {
   private startClock(entry: AssistantEntry): void {
     this.turnStartedAt = Date.now();
     this.stopClock();
-    this.clockTimer = setInterval(() => {
+    this.clockTimer = window.setInterval(() => {
       const sec = Math.floor((Date.now() - this.turnStartedAt) / 1000);
       entry.clockEl?.setText(`${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`);
     }, 1000);
@@ -269,7 +269,7 @@ export class ChatConversation {
 
   private stopClock(): void {
     if (this.clockTimer != null) {
-      clearInterval(this.clockTimer);
+      window.clearInterval(this.clockTimer);
       this.clockTimer = null;
     }
   }
@@ -289,7 +289,7 @@ export class ChatConversation {
 
   private scheduleRender(entry: AssistantEntry): void {
     if (this.renderTimer != null) return;
-    this.renderTimer = setTimeout(() => {
+    this.renderTimer = window.setTimeout(() => {
       this.renderTimer = null;
       this.flushMarkdown(entry);
       this.scrollBottom();
@@ -338,7 +338,7 @@ export class ChatConversation {
     row.createSpan({ cls: "dshc-sep" });
     row.createSpan({ cls: "dshc-sum", text: summarizeInput(input) });
     const body = details.createDiv({ cls: "dshc-toolbody" });
-    if (input != null && Object.keys(input as object).length > 0) {
+    if (input != null && Object.keys(input).length > 0) {
       body.createEl("pre", {
         cls: "dshc-pre",
         text: JSON.stringify(input, null, 2),

@@ -31,9 +31,9 @@ export class DshChatView extends ItemView {
   private activeSessionId = "";
   /** Current session title, resolved by id against the latest sessions payload. */
   private currentSessionTitle = "";
-  private sessionsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private sessionsRefreshTimer: number | null = null;
   /** Low-frequency poll so deletions/archives made in dsh web drop out of the list. */
-  private sessionsSyncTimer: ReturnType<typeof setInterval> | null = null;
+  private sessionsSyncTimer: number | null = null;
   /** Set when the boot auto-resume is armed; consumed by the next sessions payload. */
   private pendingResume = false;
   /** Suppress one boot auto-resume because the user explicitly asked for a new chat. */
@@ -90,7 +90,7 @@ export class DshChatView extends ItemView {
     this.renderStatus();
     // Keep the history list in step with dsh web: re-query every 12s so a
     // session deleted/archived there disappears here without a manual refresh.
-    this.sessionsSyncTimer = setInterval(() => {
+    this.sessionsSyncTimer = window.setInterval(() => {
       if (this.plugin.bridgeStatus() !== "stopped") {
         void this.plugin.sendCommand({ cmd: "list_sessions" });
       }
@@ -98,8 +98,8 @@ export class DshChatView extends ItemView {
   }
 
   async onClose(): Promise<void> {
-    if (this.sessionsRefreshTimer != null) clearTimeout(this.sessionsRefreshTimer);
-    if (this.sessionsSyncTimer != null) clearInterval(this.sessionsSyncTimer);
+    if (this.sessionsRefreshTimer != null) window.clearTimeout(this.sessionsRefreshTimer);
+    if (this.sessionsSyncTimer != null) window.clearInterval(this.sessionsSyncTimer);
     this.conversation.dispose();
     document.removeEventListener("pointerdown", this.onDocPointerDown);
     this.plugin.unbindView(this);
@@ -325,7 +325,7 @@ export class DshChatView extends ItemView {
   /** One debounced list_sessions round-trip so header/history titles stay fresh. */
   private scheduleSessionsRefresh(delayMs: number): void {
     if (this.sessionsRefreshTimer != null) return;
-    this.sessionsRefreshTimer = setTimeout(() => {
+    this.sessionsRefreshTimer = window.setTimeout(() => {
       this.sessionsRefreshTimer = null;
       void this.plugin.sendCommand({ cmd: "list_sessions" });
     }, delayMs);

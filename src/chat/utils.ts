@@ -54,10 +54,8 @@ export async function copyText(text: string): Promise<boolean> {
     // legacy execCommand path, which works there.
   }
   try {
-    const ta = document.createElement("textarea");
+    const ta = document.body.createEl("textarea", { cls: "dsh-clipboard-ghost" });
     ta.value = text;
-    ta.addClass("dsh-clipboard-ghost");
-    document.body.appendChild(ta);
     ta.select();
     const ok = document.execCommand("copy");
     ta.remove();
