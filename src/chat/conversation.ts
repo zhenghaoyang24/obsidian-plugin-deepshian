@@ -1,14 +1,15 @@
 import { App, Component, MarkdownRenderer, Notice } from "obsidian";
 import { t as tt } from "../i18n";
-import { copyLabel, RENDER_THROTTLE_MS, type AssistantEntry, type Entry, type ToolEntry, type UserEntry } from "./types";
-import { copyText, previewLine, summarizeInput } from "./utils";
 import {
-  ICON_CHEVRON,
-  ICON_COMMAND,
-  ICON_COPY,
-  ICON_THINK,
-  svgIcon,
-} from "./icons";
+  copyLabel,
+  RENDER_THROTTLE_MS,
+  type AssistantEntry,
+  type Entry,
+  type ToolEntry,
+  type UserEntry,
+} from "./types";
+import { copyText, previewLine, summarizeInput } from "./utils";
+import { ICON_CHEVRON, ICON_COMMAND, ICON_COPY, ICON_THINK, svgIcon } from "./icons";
 import type { ReplayTurn } from "../bridge/types";
 
 /**
@@ -44,6 +45,10 @@ export class ChatConversation {
 
   /** Reset to the empty New Session state (DOM + streaming state). */
   clear(): void {
+    // A render may still be pending for an entry this clear is about to
+    // detach; cancel it so the callback never flushes into a detached node.
+    if (this.renderTimer != null) window.clearTimeout(this.renderTimer);
+    this.renderTimer = null;
     this.entries = [];
     this.currentAssistant = null;
     this.stopClock();
@@ -109,12 +114,23 @@ export class ChatConversation {
     // (.is-pending) until the turn finishes, then revealed by finishAssistant.
     const foot = root.createDiv({ cls: "dshc-foot is-pending" });
     entry.footEl = foot;
-    this.buildCopyButton(foot, () => {
-      const text = entry.text.trim();
-      return text !== "" ? text : (entry.error ?? "");
-    }, copyLabel());
+    this.buildCopyButton(
+      foot,
+      () => {
+        const text = entry.text.trim();
+        return text !== "" ? text : (entry.error ?? "");
+      },
+      copyLabel(),
+    );
     entry.usageEl = foot.createDiv({ cls: "dshc-usage" });
 
+    // Bind as the live streaming target before returning. The view's
+    // turn_start handler discards this return value, so without this line
+    // currentAssistant stays null for the whole turn and every text /
+    // reasoning / usage / tool_result event is silently dropped
+    // (regression from the eceeaf9 view split: the pre-refactor view assigned
+    // its own currentAssistant field from pushAssistant's return value).
+    this.currentAssistant = entry;
     this.entries.push(entry);
     this.scrollBottom();
     return entry;
@@ -228,14 +244,18 @@ export class ChatConversation {
         for (const tool of turn.tools ?? []) {
           const details = this.buildToolCard(entry.toolsEl ?? this.columnEl, tool.name, tool.input);
           details.setAttribute("data-state", tool.isError ? "error" : "ok");
-          details.querySelector(".dshc-dot")?.setAttribute("data-state", tool.isError ? "error" : "ok");
-          details.querySelector<HTMLElement>(".dshc-sum")?.setText(
-            tool.isError
-              ? tt("失败", "failed")
-              : tool.output
-                ? previewLine(tool.output)
-                : tt("完成", "done"),
-          );
+          details
+            .querySelector(".dshc-dot")
+            ?.setAttribute("data-state", tool.isError ? "error" : "ok");
+          details
+            .querySelector<HTMLElement>(".dshc-sum")
+            ?.setText(
+              tool.isError
+                ? tt("失败", "failed")
+                : tool.output
+                  ? previewLine(tool.output)
+                  : tt("完成", "done"),
+            );
           const pre = details.querySelector<HTMLPreElement>(".dshc-output");
           if (pre && tool.output) {
             pre.removeAttribute("style");
@@ -248,6 +268,10 @@ export class ChatConversation {
         }
       }
     }
+    // Replayed entries are finished history, never live-streaming targets:
+    // clear the binding pushAssistant() established so isBusy() (and with it
+    // the send button) does not stay stuck on a restored conversation.
+    this.currentAssistant = null;
     this.scrollBottom();
   }
 
@@ -320,11 +344,7 @@ export class ChatConversation {
   }
 
   /** Build one dsh-style disclosure-row tool card inside `container`. */
-  private buildToolCard(
-    container: HTMLElement,
-    name: string,
-    input: unknown,
-  ): HTMLDetailsElement {
+  private buildToolCard(container: HTMLElement, name: string, input: unknown): HTMLDetailsElement {
     const details = container.createEl("details", {
       cls: "dshc-disc dshc-tool",
       attr: { "data-state": "running" },
