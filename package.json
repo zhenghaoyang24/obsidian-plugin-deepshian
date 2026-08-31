@@ -5,6 +5,8 @@
   "main": "main.js",
   "scripts": {
     "typecheck": "tsc -noEmit -skipLibCheck",
+    "lint": "eslint src tests",
+    "test": "vitest run",
     "build": "node scripts/build.mjs",
     "dev": "node scripts/build.mjs --watch"
   },
@@ -26,9 +28,14 @@
   },
   "license": "MIT",
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.0.0",
     "esbuild": "^0.28.2",
+    "eslint": "^10.9.1",
+    "globals": "^17.11.0",
     "obsidian": "^1.5.7",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "typescript-eslint": "^8.68.0",
+    "vitest": "^4.1.11"
   }
 }

@@ -5,127 +5,127 @@
 export type ChatMode = "writable" | "readonly";
 
 export interface ReadyEvent {
-	t: "ready";
-	model: string;
-	cwd: string;
-	/** Session id of the agent the bridge booted with. */
-	session?: string;
+  t: "ready";
+  model: string;
+  cwd: string;
+  /** Session id of the agent the bridge booted with. */
+  session?: string;
 }
 export interface TurnStartEvent {
-	t: "turn_start";
+  t: "turn_start";
 }
 export interface TextEvent {
-	t: "text";
-	delta: string;
+  t: "text";
+  delta: string;
 }
 export interface ReasoningEvent {
-	t: "reasoning";
-	delta: string;
+  t: "reasoning";
+  delta: string;
 }
 export interface ToolUseEvent {
-	t: "tool_use";
-	callId?: string;
-	name?: string;
-	input: unknown;
+  t: "tool_use";
+  callId?: string;
+  name?: string;
+  input: unknown;
 }
 export interface ToolResultEvent {
-	t: "tool_result";
-	callId?: string;
-	isError: boolean;
-	output: string;
-	diffs?: unknown[];
+  t: "tool_result";
+  callId?: string;
+  isError: boolean;
+  output: string;
+  diffs?: unknown[];
 }
 export interface UsageEvent {
-	t: "usage";
-	usage: Record<string, number>;
+  t: "usage";
+  usage: Record<string, number>;
 }
 export interface TurnEndEvent {
-	t: "turn_end";
-	reason: string;
-	error?: string;
+  t: "turn_end";
+  reason: string;
+  error?: string;
 }
 export interface ErrorEvent {
-	t: "error";
-	message: string;
-	stack?: string;
+  t: "error";
+  message: string;
+  stack?: string;
 }
 
 // ------------------------------------------------------------ session sync
 export interface ModelSelection {
-	provider: string;
-	model: string;
+  provider: string;
+  model: string;
 }
 
 /** One catalog row from the bridge's `llm.listModels` fold. */
 export interface ModelInfo {
-	provider: string;
-	id: string;
-	name: string;
+  provider: string;
+  id: string;
+  name: string;
 }
 
 export interface ModelsEvent {
-	t: "models";
-	current: ModelSelection;
-	models: ModelInfo[];
+  t: "models";
+  current: ModelSelection;
+  models: ModelInfo[];
 }
 
 export interface SessionSummary {
-	id: string;
-	title?: string;
-	updatedAt?: number;
-	live?: boolean;
+  id: string;
+  title?: string;
+  updatedAt?: number;
+  live?: boolean;
 }
 
 export interface SessionsEvent {
-	t: "sessions";
-	sessions: SessionSummary[];
-	cwd?: string;
-	/** Echoed by the bridge when this payload answers an archive_session command. */
-	archived?: string;
+  t: "sessions";
+  sessions: SessionSummary[];
+  cwd?: string;
+  /** Echoed by the bridge when this payload answers an archive_session command. */
+  archived?: string;
 }
 
 /** One folded turn of a restored session's persisted history. */
 export interface ReplayTool {
-	name: string;
-	input?: unknown;
-	output?: string;
-	isError?: boolean;
+  name: string;
+  input?: unknown;
+  output?: string;
+  isError?: boolean;
 }
 
 export interface ReplayTurn {
-	user?: string;
-	assistant?: string;
-	usage?: Record<string, number>;
-	tools?: ReplayTool[];
+  user?: string;
+  assistant?: string;
+  usage?: Record<string, number>;
+  tools?: ReplayTool[];
 }
 
 export interface SessionOpenedEvent {
-	t: "session_opened";
-	id: string;
-	model: string;
-	turns: ReplayTurn[];
+  t: "session_opened";
+  id: string;
+  model: string;
+  turns: ReplayTurn[];
 }
 
 /** A fresh session was minted lazily (first prompt of a new conversation). */
 export interface SessionCreatedEvent {
-	t: "session_created";
-	id: string;
-	model: string;
+  t: "session_created";
+  id: string;
+  model: string;
 }
 
 export type DshEvent =
-	| ReadyEvent
-	| TurnStartEvent
-	| TextEvent
-	| ReasoningEvent
-	| ToolUseEvent
-	| ToolResultEvent
-	| UsageEvent
-	| TurnEndEvent
-	| ErrorEvent
-	| ModelsEvent
-	| SessionsEvent
-	| SessionOpenedEvent
-	| SessionCreatedEvent;
+  | ReadyEvent
+  | TurnStartEvent
+  | TextEvent
+  | ReasoningEvent
+  | ToolUseEvent
+  | ToolResultEvent
+  | UsageEvent
+  | TurnEndEvent
+  | ErrorEvent
+  | ModelsEvent
+  | SessionsEvent
+  | SessionOpenedEvent
+  | SessionCreatedEvent;
 
 export type BridgeStatus = "stopped" | "connecting" | "ready" | "running";

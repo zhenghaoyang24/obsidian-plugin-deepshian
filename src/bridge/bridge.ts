@@ -1,5 +1,5 @@
 import { ChildProcess, spawn } from "child_process";
-import type { BridgeStatus, DshEvent } from "./types";
+import type { BridgeStatus, ChatMode, DshEvent } from "./types";
 
 export interface BridgeOptions {
   command: string;
@@ -88,7 +88,7 @@ export class DshBridge {
   }
 
   /** Send one user prompt. Safe even before the first `ready` line arrives. */
-  send(prompt: string, mode: string): boolean {
+  send(prompt: string, mode: ChatMode): boolean {
     return this.writeLine(JSON.stringify({ prompt, mode }));
   }
 
@@ -110,16 +110,37 @@ export class DshBridge {
 
   stop(): void {
     if (this.child) {
-      try {
-        this.child.kill();
-      } catch {
-        /* already gone */
-      }
+      this.killChild(this.child);
       this.child = null;
     }
     this.status = "stopped";
     this.model = "";
     this.handlers.onStatus("stopped");
+  }
+
+  /**
+   * Terminate the bridge process. On Windows the child was spawned through a
+   * shell (dsh.cmd), so killing the shell alone would orphan the real node
+   * process — taskkill /T /F tears down the whole tree instead.
+   */
+  private killChild(child: ChildProcess): void {
+    if (child.exitCode != null) return;
+    if (process.platform === "win32" && child.pid != null) {
+      try {
+        spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+          windowsHide: true,
+          stdio: "ignore",
+        });
+        return;
+      } catch {
+        /* taskkill unavailable — fall through to the direct kill */
+      }
+    }
+    try {
+      child.kill();
+    } catch {
+      /* already gone */
+    }
   }
 
   get alive(): boolean {

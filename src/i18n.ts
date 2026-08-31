@@ -16,11 +16,11 @@ declare const moment: { locale(): string };
 
 /** Obsidian UI locale folded to our two locales: zh* → "zh", else "en". */
 export function obsidianLocale(): Locale {
-	try {
-		return moment.locale().toLowerCase().startsWith("zh") ? "zh" : "en";
-	} catch {
-		return "en";
-	}
+  try {
+    return moment.locale().toLowerCase().startsWith("zh") ? "zh" : "en";
+  } catch {
+    return "en";
+  }
 }
 
 /** Locale currently in force (set by applyLanguageSetting at load/switch). */
@@ -28,17 +28,17 @@ let current: Locale = "en";
 
 /** Resolve a stored setting to its effective locale. */
 export function effectiveLocale(setting: LanguageSetting): Locale {
-	return setting === "auto" ? obsidianLocale() : setting;
+  return setting === "auto" ? obsidianLocale() : setting;
 }
 
 /** Apply the stored language setting (call after load and on every change). */
 export function applyLanguageSetting(setting: LanguageSetting): void {
-	current = effectiveLocale(setting);
+  current = effectiveLocale(setting);
 }
 
 /** The locale in force right now. */
 export function currentLocale(): Locale {
-	return current;
+  return current;
 }
 
 /**
@@ -46,5 +46,5 @@ export function currentLocale(): Locale {
  * match the historical helper in chat-view.ts.
  */
 export function t(zh: string, en: string): string {
-	return current === "zh" ? zh : en;
+  return current === "zh" ? zh : en;
 }
