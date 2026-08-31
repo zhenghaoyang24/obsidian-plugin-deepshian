@@ -1239,6 +1239,107 @@
   display: none;
 }
 
+/* @ file-reference panel, anchored to the top edge of the composer card so it
+ * sits flush above the input box at exactly the input box's width */
+.dshc-refpanel {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  max-height: 42vh;
+  overflow: hidden;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-s);
+}
+.dshc-refpanel[hidden] {
+  display: none;
+}
+.dsh-chat .dshc-refsearch {
+  width: 100%;
+  padding: 18px 12px;
+  border: none;
+  border-bottom: 1px solid var(--background-modifier-border);
+  border-radius: 0;
+  background: transparent;
+  font-size: var(--font-ui-small);
+}
+/* Host themes paint input hover/focus chrome; keep the search box flat. */
+.dsh-chat .dshc-refsearch:hover,
+.dsh-chat .dshc-refsearch:focus,
+.dsh-chat .dshc-refsearch:focus-visible {
+  background: transparent;
+  box-shadow: none;
+}
+.dshc-ref-list {
+  overflow-y: auto;
+}
+/* Flat tree rows immune to host-theme button chrome, like the session list. */
+.dsh-chat .dshc-ref-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  /* generous gap so the arrow is not accidentally hit when picking a folder */
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 8px;
+  box-shadow: none;
+  background: transparent;
+  font-size: var(--font-ui-small);
+  text-align: left;
+  cursor: pointer;
+}
+.dsh-chat .dshc-ref-item:hover,
+.dsh-chat .dshc-ref-item:focus-visible {
+  background: var(--dshc-interactive-hover);
+}
+/* Hover feedback is per-element, so the arrow and the name read as distinct
+ * click targets: text colors on its own hover, the arrow colors on its own. */
+.dsh-chat .dshc-ref-name:hover {
+  color: var(--dshc-accent);
+}
+.dsh-chat .dshc-ref-arrow:hover {
+  color: var(--dshc-accent);
+}
+.dshc-ref-arrow {
+  flex: none;
+  width: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1;
+  transition: transform 0.12s ease;
+}
+.dshc-ref-arrow.open {
+  transform: rotate(90deg);
+}
+.dshc-ref-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Panel section headings: small, secondary text */
+.dshc-ref-section {
+  padding: 8px 10px 3px;
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--dshc-label-tertiary);
+}
+.dshc-ref-empty {
+  padding: 8px 10px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
 /* Ghost textarea for the legacy clipboard fallback — fixed & invisible while
  * it briefly holds focus, never part of the visible layout. */
 .dsh-clipboard-ghost {

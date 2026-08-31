@@ -1,4 +1,4 @@
-import { Notice } from "obsidian";
+import { Notice, TAbstractFile, TFolder, TFile } from "obsidian";
 import { t as tt } from "../i18n";
 import { modeMeta } from "./types";
 import { parseModelString } from "./utils";
@@ -24,6 +24,31 @@ export interface ChatComposerCallbacks {
   onInputChanged(): void;
 }
 
+/** Vault top-level directories never offered as @ references. */
+const REF_EXCLUDED_DIRS = new Set([".git", ".obsidian", ".trash", "node_modules"]);
+/** File types the sidebar can surface in @ references (everything Obsidian
+ * can natively display: notes, canvases, PDFs, images, audio and video). */
+const REF_FILE_EXTS = new Set([
+  "md",
+  "canvas",
+  "pdf",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "svg",
+  "webp",
+  "bmp",
+  "mp3",
+  "wav",
+  "ogg",
+  "m4a",
+  "mp4",
+  "webm",
+]);
+/** Maximum candidates rendered in one @ panel. */
+const REF_MAX_RESULTS = 50;
+
 /**
  * Owns the composer card: the autosizing textarea, the access-mode select, the
  * model selector menu, and the round send/stop button.
@@ -45,6 +70,13 @@ export class ChatComposer {
   private modelsCache: ModelInfo[] = [];
   private currentSelection: ModelSelection | null = null;
 
+  // @ file-reference panel state
+  private refPanelEl!: HTMLElement;
+  private refSearchEl!: HTMLInputElement;
+  private refListEl!: HTMLElement;
+  /** Folders expanded in the tree (paths). */
+  private refExpanded = new Set<string>();
+
   constructor(
     private contentEl: HTMLElement,
     private plugin: DshBridgePlugin,
@@ -57,6 +89,29 @@ export class ChatComposer {
     const composer = this.contentEl.createDiv({ cls: "dsh-composer" });
     const card = composer.createDiv({ cls: "dshc-card" });
 
+    // @ file-reference panel, anchored to the card's top edge so its width
+    // always matches the input box.
+    this.refPanelEl = card.createDiv({ cls: "dshc-refpanel", attr: { hidden: "" } });
+    this.refSearchEl = this.refPanelEl.createEl("input", {
+      cls: "dshc-refsearch",
+      attr: {
+        type: "text",
+        placeholder: tt("搜索文件或文件夹…", "Search files or folders…"),
+        spellcheck: "false",
+      },
+    });
+    this.refSearchEl.addEventListener("input", () => {
+      // Typing in the search box rewrites the @ token so both stay in sync.
+      const tok = this.refToken();
+      if (!tok) return;
+      const v = this.inputEl.value;
+      this.inputEl.value = v.slice(0, tok.start) + "@" + this.refSearchEl.value + v.slice(tok.caret);
+      const caret = tok.start + 1 + this.refSearchEl.value.length;
+      this.inputEl.setSelectionRange(caret, caret);
+      this.renderRefList();
+    });
+    this.refListEl = this.refPanelEl.createDiv({ cls: "dshc-ref-list" });
+
     // Owns the scroll once the textarea passes --dsh-input-max-height, so the
     // textarea itself never shows a scrollbar (mirrors the dsh web composer).
     const inputScroll = card.createDiv({ cls: "dshc-inputscroll" });
@@ -66,20 +121,24 @@ export class ChatComposer {
       // reach the DOM even if a host helper drops the top-level option.
       attr: {
         placeholder: tt(
-          "向 DeepShian 描述你想完成的事情…",
-          "Describe what you want DeepShian to accomplish…",
+          "描述你的想法，或输入 @ 添加上下文",
+          "Describe what you want, or type @ to add context",
         ),
       },
     });
     this.inputEl.addEventListener("keydown", (evt: KeyboardEvent) => {
       if (evt.key === "Enter" && !evt.shiftKey && !evt.isComposing) {
         evt.preventDefault();
+        this.closeRefPanel();
         this.sendCurrentInput();
+      } else if (evt.key === "Escape") {
+        this.closeRefPanel();
       }
     });
     this.inputEl.addEventListener("input", () => {
       this.autosize();
       this.callbacks.onInputChanged();
+      this.refreshRefPanel();
     });
 
     const row = card.createDiv({ cls: "dshc-row" });
@@ -169,7 +228,10 @@ export class ChatComposer {
   relocalize(): void {
     this.inputEl.setAttribute(
       "placeholder",
-      tt("向 DeepShian 描述你想完成的事情…", "Describe what you want DeepShian to accomplish…"),
+      tt(
+        "描述你的想法，或输入 @ 添加上下文",
+        "Describe what you want, or type @ to add context",
+      ),
     );
     for (const item of Array.from(this.modeMenuEl.children) as HTMLElement[]) {
       const value = item.getAttribute("data-value") as ChatMode | null;
@@ -285,6 +347,11 @@ export class ChatComposer {
         this.closeModelMenu();
       }
     }
+    if (!this.refPanelEl.hasAttribute("hidden")) {
+      if (!this.refPanelEl.contains(target) && !this.inputEl.contains(target)) {
+        this.closeRefPanel();
+      }
+    }
   }
 
   // ---------------------------------------------------------------- private
@@ -337,5 +404,223 @@ export class ChatComposer {
   private closeModelMenu(): void {
     this.modelMenuEl.setAttribute("hidden", "");
     this.modelBtn.removeClass("open");
+  }
+
+  // -------------------------------------------------------- @ file reference
+  /**
+   * Locate the `@` mention under the caret, if any. Recognized only at the
+   * start of input or after whitespace (so emails never trigger it), mirroring
+   * dsh web's file-reference grammar. `@"...` allows spaces in the path.
+   */
+  private refToken(): { start: number; caret: number; query: string } | null {
+    const v = this.inputEl.value;
+    const caret = this.inputEl.selectionStart ?? v.length;
+    const prefix = v.slice(0, caret);
+    const quoted = prefix.match(/(?:^|\s)@"([^"]*)$/);
+    if (quoted) {
+      return { start: quoted.index! + quoted[0].indexOf("@"), caret, query: quoted[1] };
+    }
+    const bare = prefix.match(/(?:^|\s)@([^\s@"]*)$/);
+    if (!bare) return null;
+    return { start: bare.index! + bare[0].indexOf("@"), caret, query: bare[1] };
+  }
+
+  /** Open or update the reference panel to follow the current @ token. */
+  private refreshRefPanel(): void {
+    const tok = this.refToken();
+    if (!tok) {
+      this.closeRefPanel();
+      return;
+    }
+    if (this.refPanelEl.hasAttribute("hidden")) {
+      this.refPanelEl.removeAttribute("hidden");
+    }
+    this.refSearchEl.value = tok.query;
+    this.renderRefList();
+  }
+
+  private closeRefPanel(): void {
+    if (this.refPanelEl && !this.refPanelEl.hasAttribute("hidden")) {
+      this.refPanelEl.setAttribute("hidden", "");
+    }
+    this.refExpanded.clear();
+  }
+
+  /** Direct children of `dir` (folders first, visibility-filtered). */
+  private refChildren(dir: string): TAbstractFile[] {
+    const all = this.plugin.app.vault.getAllLoadedFiles();
+    const prefix = dir === "" ? "" : `${dir}/`;
+    return all
+      .filter((f) => {
+        if (f.path === dir || !f.path.startsWith(prefix)) return false;
+        if (f.path.slice(prefix.length).includes("/")) return false;
+        if (dir === "" && REF_EXCLUDED_DIRS.has(f.path.split("/")[0])) return false;
+        return this.refVisible(f);
+      })
+      .sort((a, b) => this.refRank(a) - this.refRank(b) || a.path.localeCompare(b.path));
+  }
+
+  /** Folders before files (dsh web ranks candidates the same way). */
+  private refRank(f: TAbstractFile): number {
+    return f instanceof TFolder ? 0 : 1;
+  }
+
+  /** Vault-top-level dirs never referenced: .git / .obsidian / .trash / node_modules. */
+  private refExcluded(f: TAbstractFile): boolean {
+    const top = f.path.split("/")[0];
+    return REF_EXCLUDED_DIRS.has(top);
+  }
+
+  /** Files only when Obsidian can display their type; folders always. */
+  private refVisible(f: TAbstractFile): boolean {
+    if (f instanceof TFolder) return true;
+    if (!(f instanceof TFile)) return false;
+    return REF_FILE_EXTS.has(f.extension.toLowerCase());
+  }
+
+  private renderRefList(): void {
+    this.refListEl.empty();
+    const tok = this.refToken();
+    const query = tok?.query ?? "";
+    if (query !== "") {
+      this.renderRefSearch(query);
+      return;
+    }
+    const active = this.plugin.app.workspace.getActiveFile();
+    if (active) {
+      if (REF_FILE_EXTS.has(active.extension.toLowerCase())) {
+        this.appendRefSection(tt("当前文件", "Current file"));
+        this.appendRefItem(active.name, 0, null, () => this.insertReference(active.path));
+      }
+      // Vault root is also a TFolder with an empty name — skip it so the
+      // "current folder" section never shows a blank row for root files.
+      const parent = active.parent;
+      if (parent && !parent.isRoot()) {
+        this.appendRefSection(tt("当前文件夹", "Current folder"));
+        this.appendRefItem(parent.name, 0, parent.path, () =>
+          this.insertReference(`${parent.path}/`),
+        );
+        if (this.refExpanded.has(parent.path)) {
+          this.renderRefTree(parent.path, 1);
+        }
+      }
+    }
+    this.appendRefSection(tt("所有文件", "All files"));
+    this.renderRefTree("", 0);
+  }
+
+  /** One small secondary-color section heading inside the panel. */
+  private appendRefSection(title: string): void {
+    this.refListEl.createDiv({ cls: "dshc-ref-section", text: title });
+  }
+
+  /**
+   * One row: optional expand arrow (when `arrowTarget` is a folder path),
+   * then the name. Only the arrow toggles the folder and only the name
+   * selects — clicking the row's dead space does nothing.
+   */
+  private appendRefItem(
+    name: string,
+    depth: number,
+    arrowTarget: string | null,
+    onSelect: () => void,
+  ): HTMLButtonElement {
+    const row = this.refListEl.createEl("button", {
+      cls: "dshc-ref-item",
+      attr: { type: "button" },
+    });
+    row.style.paddingLeft = `${10 + depth * 16}px`;
+    if (arrowTarget !== null) {
+      const arrow = row.createSpan({ cls: "dshc-ref-arrow" });
+      arrow.setText("▶");
+      arrow.toggleClass("open", this.refExpanded.has(arrowTarget));
+      arrow.addEventListener("click", () => this.toggleRefDir(arrowTarget));
+    }
+    const nameEl = row.createSpan({ cls: "dshc-ref-name", text: name });
+    nameEl.addEventListener("click", () => onSelect());
+    return row;
+  }
+
+  /** Tree mode: root children, then every expanded folder's children, lazily. */
+  private renderRefTree(dir: string, depth: number): void {
+    for (const f of this.refChildren(dir)) {
+      const isDir = f instanceof TFolder;
+      const name = f.path.split("/").pop() ?? f.path;
+      this.appendRefItem(name, depth, isDir ? f.path : null, () => {
+        if (isDir) this.insertReference(`${f.path}/`);
+        else this.insertReference(f.path);
+      });
+      if (isDir && this.refExpanded.has(f.path)) {
+        this.renderRefTree(f.path, depth + 1);
+      }
+    }
+  }
+
+  /** Expand/collapse one folder and repaint only that subtree's rows. */
+  private toggleRefDir(path: string): void {
+    const list = this.refListEl;
+    // renderRefList() rebuilds the list (empty() clamps scrollTop to 0), so
+    // restore the viewport position afterwards — expanding must never jump
+    // the list back to the top.
+    const scrollTop = list.scrollTop;
+    if (this.refExpanded.has(path)) this.refExpanded.delete(path);
+    else this.refExpanded.add(path);
+    this.renderRefList();
+    list.scrollTop = scrollTop;
+  }
+
+  /** Search mode: flat vault-wide matches; folders switch to tree browsing. */
+  private renderRefSearch(query: string): void {
+    const q = query.toLowerCase();
+    const all = this.plugin.app.vault.getAllLoadedFiles();
+    const matches = all
+      .filter(
+        (f) => !this.refExcluded(f) && this.refVisible(f) && f.path.toLowerCase().includes(q),
+      )
+      .sort((a, b) => this.refRank(a) - this.refRank(b) || a.path.localeCompare(b.path))
+      .slice(0, REF_MAX_RESULTS);
+    if (matches.length === 0) {
+      this.refListEl.createDiv({
+        cls: "dshc-ref-empty",
+        text: tt("无匹配的文件或文件夹", "No matching files or folders"),
+      });
+      return;
+    }
+    for (const f of matches) {
+      const isDir = f instanceof TFolder;
+      const name = f.path.split("/").pop() ?? f.path;
+      this.appendRefItem(name, 0, isDir ? f.path : null, () => {
+        if (isDir) this.enterRefDir(f.path);
+        else this.insertReference(f.path);
+      });
+    }
+  }
+
+  /** A folder picked from search: rewrite the @ token to "<dir>/" and expand it. */
+  private enterRefDir(dir: string): void {
+    const tok = this.refToken();
+    if (!tok) return;
+    const v = this.inputEl.value;
+    this.inputEl.value = v.slice(0, tok.start) + `@${dir}/` + v.slice(tok.caret);
+    const caret = tok.start + 1 + dir.length + 1;
+    this.inputEl.setSelectionRange(caret, caret);
+    this.refSearchEl.value = "";
+    this.refExpanded.add(dir);
+    this.renderRefList();
+  }
+
+  /** Insert the `@path` mention (quoted when it contains spaces) and close. */
+  private insertReference(path: string): void {
+    const tok = this.refToken();
+    if (!tok) return;
+    const mention = `@${/\s/.test(path) ? `"${path}"` : path} `;
+    const v = this.inputEl.value;
+    this.inputEl.value = v.slice(0, tok.start) + mention + v.slice(tok.caret);
+    const caret = tok.start + mention.length;
+    this.inputEl.setSelectionRange(caret, caret);
+    this.inputEl.focus();
+    this.closeRefPanel();
+    this.autosize();
+    this.callbacks.onInputChanged();
   }
 }

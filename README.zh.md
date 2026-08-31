@@ -18,6 +18,7 @@ DeepShian 把 [DeepSeek Harness](https://www.deepseek.com/harness/) 直接带进
 - ✨模型选择：可以像 dsh web 哪样选择任意模型。
 - 💬会话同步：DeepShian 工作空间与 dsh web 同步，包括会话记录，归档与删除。
 - 🔐权限控制：可以像 dsh web 那样选择 Agent 的操作权限，**Read Only** 或 **Workspace Write**。
+- 📎文件引用：在输入框输入 `@` 即可引用 vault 中的文件或文件夹，Agent 会带着完整上下文读取它们。
 - 🎨对话体验：与 dsh web 一样的对话体验，包括流式输出、思考过程、工具调用等。
 - 🌐多语言：界面完全双语（中文 / English），并跟随你的 Obsidian 语言。
 

@@ -18,6 +18,7 @@ DeepShian brings [DeepSeek Harness](https://www.deepseek.com/harness/) into Obsi
 - ✨ Model picker: choose any model, just like in dsh web.
 - 💬 Conversation sync: the DeepShian workspace syncs with dsh web, including conversation history, archive, and deletion.
 - 🔐 Access control: choose the agent's access mode like in dsh web — **Read Only** or **Workspace Write**.
+- 📎 File references: type `@` in the input to pick a file or folder from your vault — the agent reads it with full context.
 - 🎨 Chat experience: the same chat experience as dsh web, including streaming output, thinking steps, tool calls, and more.
 - 🌐 Multilingual: fully bilingual UI (中文 / English) that follows your Obsidian language.
 
