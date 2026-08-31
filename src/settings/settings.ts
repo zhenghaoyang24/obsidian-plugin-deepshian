@@ -1,7 +1,7 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
-import { applyLanguageSetting, t, type LanguageSetting, type Locale } from "./i18n";
-import type DshBridgePlugin from "./main";
-import { profileDir } from "./profile-install";
+import { applyLanguageSetting, t, type LanguageSetting, type Locale } from "../i18n";
+import type DshBridgePlugin from "../main";
+import { profileDir } from "../profile/install";
 
 export interface DshSettings {
 	/** dsh profile to boot; must contain the deepshian-bridge insert. */

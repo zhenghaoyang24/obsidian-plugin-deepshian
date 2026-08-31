@@ -16,9 +16,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 
-import bridgeSource from "../dsh-profile/deepshian/deepshian-bridge.mjs?raw";
-import cordisYml from "../dsh-profile/deepshian/cordis.yml?raw";
-import profilePackageJson from "../dsh-profile/deepshian/package.json?raw";
+import bridgeSource from "../../dsh-profile/deepshian/deepshian-bridge.mjs?raw";
+import cordisYml from "../../dsh-profile/deepshian/cordis.yml?raw";
+import profilePackageJson from "../../dsh-profile/deepshian/package.json?raw";
 
 /** Bridge profile name (matches --profile and $DSH_HOME/profiles/<name>). */
 export const DEFAULT_PROFILE = "deepshian";

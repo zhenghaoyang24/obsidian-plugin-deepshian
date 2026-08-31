@@ -1,6 +1,6 @@
 import { App, ButtonComponent, Modal, Notice, Setting } from "obsidian";
-import { t } from "./i18n";
-import { installProfile, profileDir } from "./profile-install";
+import { t } from "../i18n";
+import { installProfile, profileDir } from "./install";
 
 /**
  * Shown on first startup (or whenever the bridge profile is missing): explains

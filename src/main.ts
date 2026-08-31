@@ -1,11 +1,11 @@
 import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
-import { DshBridge } from "./bridge";
-import { DshChatView, VIEW_TYPE_DSH_CHAT } from "./chat-view";
+import { DshBridge } from "./bridge/bridge";
+import { DshChatView, VIEW_TYPE_DSH_CHAT } from "./chat/view";
 import { applyLanguageSetting, t } from "./i18n";
-import { ProfileInstallModal } from "./install-modal";
-import { detectProfile, installProfile, patchPathHealthy, profileDir } from "./profile-install";
-import { DEFAULT_SETTINGS, DshSettingTab, DshSettings } from "./settings";
-import type { BridgeStatus, ChatMode, DshEvent } from "./types";
+import { ProfileInstallModal } from "./profile/install-modal";
+import { detectProfile, installProfile, patchPathHealthy, profileDir } from "./profile/install";
+import { DEFAULT_SETTINGS, DshSettingTab, DshSettings } from "./settings/settings";
+import type { BridgeStatus, ChatMode, DshEvent } from "./bridge/types";
 
 export default class DshBridgePlugin extends Plugin {
 	settings!: DshSettings;
