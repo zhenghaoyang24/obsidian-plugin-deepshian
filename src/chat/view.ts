@@ -236,6 +236,35 @@ export class DshChatView extends ItemView {
         }
         break;
       }
+      case "commands":
+        this.composer.applyCommands(event.commands, event.unsupported === true);
+        break;
+      case "skills":
+        this.composer.applySkills(event.skills, event.unsupported === true);
+        break;
+      case "command_result": {
+        if (event.kind === "miss") {
+          const name = event.name ? ` /${event.name}` : "";
+          new Notice(
+            tt(
+              `未知命令${name}：该行已按普通消息发送给模型`,
+              `Unknown command${name}: the line was sent to the model instead`,
+            ),
+          );
+        } else if (event.kind === "unsupported") {
+          this.conversation.pushSystemNote(
+            `${tt("命令", "Command")} /${event.name}: ${tt(
+              "当前 dsh 不支持本地命令执行",
+              "this dsh build does not support local command execution",
+            )}`,
+          );
+          new Notice(tt("当前 dsh 不支持本地命令执行", "This dsh build does not support local command execution"));
+          break;
+        }
+        this.conversation.pushCommand(event.name, event.kind, event.text ?? "");
+        this.conversation.scrollBottom();
+        break;
+      }
       default:
         break;
     }
@@ -248,6 +277,20 @@ export class DshChatView extends ItemView {
     const entry = this.conversation.appendUser(trimmed);
     this.composer.clearInput();
     this.renderStatus();
+    // `/name` routing, dsh web semantics: registered commands run locally via
+    // the bridge (no model round-trip); anything else - skill gestures or
+    // plain prose - goes to the agent as normal.
+    const head = trimmed.split(/\s+/)[0] ?? "";
+    if (head.startsWith("/") && this.composer.findCommand(head.slice(1)) != null) {
+      if (this.plugin.sendCommand({ cmd: "execute_command", line: trimmed })) {
+        this.conversation.scrollBottom();
+        return;
+      }
+      entry.text = `⚠️ ${tt("未发送（dsh 进程未运行）：", "Not sent (dsh process is not running): ")}${trimmed}`;
+      new Notice(tt("DSH 桥接未运行", "DSH bridge not running"));
+      this.conversation.scrollBottom();
+      return;
+    }
     if (!this.plugin.sendPrompt(trimmed, mode)) {
       entry.text = `⚠️ ${tt("未发送（dsh 进程未运行）：", "Not sent (dsh process is not running): ")}${trimmed}`;
       new Notice(tt("DSH 桥接未运行", "DSH bridge not running"));

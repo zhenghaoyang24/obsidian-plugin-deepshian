@@ -11,6 +11,9 @@
 //     {"cmd":"open_session","id":"<sessionId>"}
 //     {"cmd":"new_chat"}                    drop the live agent; next prompt mints a session
 //     {"cmd":"archive_session","id":"<sessionId>"}   archive durably (the SAME global set dsh web maintains)
+//     {"cmd":"list_commands"}               the `/` picker's command registry (same service dsh web)
+//     {"cmd":"execute_command","line":"/goal ..."}   run a slash command locally, no model round-trip
+//     {"cmd":"list_skills"}                 the `/` picker's skill catalog (same provider dsh web)
 //
 //   outbound (dsh 闁?plugin), one JSON object per line:
 //     {"t":"ready","model":"...","cwd":"..."}   (boots WITHOUT a session)
@@ -19,6 +22,9 @@
 //         (deleted + archived excluded; `archived` echoes the id an archive_session answered)
 //     {"t":"session_opened","id":"...","model":"...","turns":[{user,assistant,tools:[...]}]}
 //     {"t":"session_created","id":"...","model":"..."}   lazy mint on the first prompt
+//     {"t":"commands","commands":[{"name","description","input"}],"unsupported?":true}
+//     {"t":"skills","skills":[{"name","description","provider","userInvocable"}],"unsupported?":true}
+//     {"t":"command_result","id","name","kind":"success"|"error"|"miss"|"unsupported","text"?}
 //     {"t":"turn_start"} {"t":"turn_end",...} {"t":"error",...}
 //     {"t":"text"/"reasoning"/"tool_use"/"tool_result"/"usage"} (same as before)
 //
@@ -658,6 +664,96 @@ async function run(ctx) {
   }
 
   /**
+   * The `/` picker's command section: the same `commands` registry dsh web
+   * lists (`commands.list`), scoped to the live agent when one is up. No agent
+   * is minted just to list — global commands still appear where available.
+   * When the registry is absent (an older dsh base), `unsupported: true` lets
+   * the plugin keep the composer's `/` pane open with a hint instead of a
+   * broken empty list.
+   */
+  async function sendCommands() {
+    const commands = ctx.get("commands");
+    if (!commands || typeof commands.list !== "function") {
+      emit({ t: "commands", commands: [], unsupported: true });
+      return;
+    }
+    try {
+      const agent = handle?.agent ?? null;
+      const descriptors = commands.list(agent);
+      emit({
+        t: "commands",
+        commands: descriptors.map((c) => ({
+          name: c.name,
+          description: c.description ?? "",
+          input: c.input ?? null,
+        })),
+      });
+    } catch (err) {
+      emit({ t: "error", message: `list_commands failed: ${String(err?.message ?? err)}` });
+    }
+  }
+
+  /**
+   * The `/` picker's skill section: `skills.list` from the same layered
+   * SkillRegistry dsh web renders. Flags ride through as-is so the plugin can
+   * filter user-invocable skills at the UI boundary.
+   */
+  async function sendSkills() {
+    const skills = ctx.get("skills");
+    if (!skills || typeof skills.list !== "function") {
+      emit({ t: "skills", skills: [], unsupported: true });
+      return;
+    }
+    try {
+      const lookup = handle?.agent ? { scope: handle.agent } : {};
+      const summaries = await skills.list(lookup);
+      emit({
+        t: "skills",
+        skills: summaries.map((s) => ({
+          name: s.name,
+          description: s.description ?? "",
+          provider: s.provider ?? "",
+          userInvocable: s.invocation?.userInvocable !== false,
+        })),
+      });
+    } catch (err) {
+      emit({ t: "error", message: `list_skills failed: ${String(err?.message ?? err)}` });
+    }
+  }
+
+  /**
+   * One local slash-command run, exactly dsh web's `commands.execute`: no
+   * model round-trip, the handler's lifecycle lands in the session log
+   * (`command/run` + `command/done`) and the settled result is surfaced as a
+   * single `command_result` line. A session-less bridge mints its session
+   * lazily here too — an executed command IS activity. `kind: "miss"` means
+   * the line was not a recognized command (still useful as a skill gesture
+   * downstream), `kind: "unsupported"` means this dsh base ships no registry.
+   */
+  async function executeCommandRaw(line) {
+    const commands = ctx.get("commands");
+    if (!commands || typeof commands.execute !== "function") {
+      emit({ t: "command_result", id: null, name: "", kind: "unsupported", text: "commands service unavailable" });
+      return;
+    }
+    if (!handle) await startFresh();
+    const ac = new AbortController();
+    const executed = await commands.execute(handle.agent, line, [], ac.signal);
+    const name = (line.split(/\s+/)[0] ?? "").replace(/^\//, "");
+    if (!executed) {
+      emit({ t: "command_result", id: null, name, kind: "miss" });
+      return;
+    }
+    emit({
+      t: "command_result",
+      id: String(executed.commandId),
+      name,
+      kind: executed.result.kind,
+      ...(executed.result.text !== undefined ? { text: executed.result.text } : {}),
+    });
+  }
+
+  /**
    * Archive a session durably and resurface its listing. Mirror of dsh web:
    * the archived session leaves every grouping surface but its log and
    * workspace slot stay put (a future unarchive restores the position). When
@@ -930,6 +1026,39 @@ async function run(ctx) {
             ),
           );
           return;
+        case "list_commands":
+          track(
+            sendCommands().catch((err) =>
+              emit({ t: "error", message: `list_commands failed: ${String(err?.message ?? err)}` }),
+            ),
+          );
+          return;
+        case "list_skills":
+          track(
+            sendSkills().catch((err) =>
+              emit({ t: "error", message: `list_skills failed: ${String(err?.message ?? err)}` }),
+            ),
+          );
+          return;
+        case "execute_command": {
+          const line = typeof msg.line === "string" ? msg.line.trim() : "";
+          if (line === "" || !line.startsWith("/")) {
+            emit({
+              t: "command_result",
+              id: null,
+              name: "",
+              kind: "miss",
+              text: "execute_command: line must start with /",
+            });
+            return;
+          }
+          track(
+            executeCommandRaw(line).catch((err) =>
+              emit({ t: "error", message: `execute_command failed: ${String(err?.message ?? err)}` }),
+            ),
+          );
+          return;
+        }
         default:
           emit({ t: "error", message: `deepshian-bridge: unknown command "${msg.cmd}"` });
           return;

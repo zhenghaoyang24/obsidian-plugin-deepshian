@@ -1,6 +1,7 @@
 import { Notice, TAbstractFile, TFolder, TFile } from "obsidian";
 import { t as tt } from "../i18n";
 import { modeMeta } from "./types";
+import { previewLine } from "./utils";
 import { parseModelString } from "./utils";
 import {
   ICON_CHECK,
@@ -13,7 +14,7 @@ import {
   svgIcon,
 } from "./icons";
 import type DshBridgePlugin from "../main";
-import type { BridgeStatus, ChatMode, ModelInfo, ModelSelection } from "../bridge/types";
+import type { BridgeStatus, ChatMode, CommandInfo, ModelInfo, ModelSelection, SkillInfo } from "../bridge/types";
 
 export interface ChatComposerCallbacks {
   onSend(text: string, mode: ChatMode): void;
@@ -77,6 +78,19 @@ export class ChatComposer {
   /** Folders expanded in the tree (paths). */
   private refExpanded = new Set<string>();
 
+  // `/` command / skill picker panel state
+  private cmdPanelEl!: HTMLElement;
+  private cmdListEl!: HTMLElement;
+  private cmdEntries: CommandInfo[] = [];
+  private skillEntries: SkillInfo[] = [];
+  /** Cached descriptor lookup for the send-time `/cmd` routing decision. */
+  private cmdIndex = new Map<string, CommandInfo>();
+  /** Backoff: only one request per opening, refreshed when the answers come. */
+  private cmdRequested = false;
+  /** Row under keyboard navigation in the currently open panel. */
+  private cmdSelIndex = -1;
+  private cmdFiltered: { kind: "command" | "skill"; name: string }[] = [];
+
   constructor(
     private contentEl: HTMLElement,
     private plugin: DshBridgePlugin,
@@ -112,6 +126,11 @@ export class ChatComposer {
     });
     this.refListEl = this.refPanelEl.createDiv({ cls: "dshc-ref-list" });
 
+    // `/` command / skill picker panel, same anchor as the @ panel (they are
+    // mutually exclusive per caret position, so only one is visible at a time).
+    this.cmdPanelEl = card.createDiv({ cls: "dshc-cmdpanel", attr: { hidden: "" } });
+    this.cmdListEl = this.cmdPanelEl.createDiv({ cls: "dshc-cmd-list" });
+
     // Owns the scroll once the textarea passes --dsh-input-max-height, so the
     // textarea itself never shows a scrollbar (mirrors the dsh web composer).
     const inputScroll = card.createDiv({ cls: "dshc-inputscroll" });
@@ -121,24 +140,39 @@ export class ChatComposer {
       // reach the DOM even if a host helper drops the top-level option.
       attr: {
         placeholder: tt(
-          "描述你的想法，或输入 @ 添加上下文",
-          "Describe what you want, or type @ to add context",
+          "描述你的想法，输入 @ 引用文件，输入 / 查看命令与技能",
+          "Describe what you want — type @ to reference files, or / for commands and skills",
         ),
       },
     });
     this.inputEl.addEventListener("keydown", (evt: KeyboardEvent) => {
       if (evt.key === "Enter" && !evt.shiftKey && !evt.isComposing) {
         evt.preventDefault();
+        if (this.cmdPanelOpen() && this.cmdFiltered.length > 0) {
+          this.chooseCmdSelection();
+          return;
+        }
+        this.closeCmdPanel();
         this.closeRefPanel();
         this.sendCurrentInput();
       } else if (evt.key === "Escape") {
         this.closeRefPanel();
+        this.closeCmdPanel();
+      } else if (this.cmdPanelOpen() && (evt.key === "ArrowDown" || evt.key === "ArrowUp")) {
+        if (this.cmdFiltered.length > 0) {
+          evt.preventDefault();
+          const n = this.cmdFiltered.length;
+          this.cmdSelIndex =
+            ((this.cmdSelIndex < 0 ? (evt.key === "ArrowDown" ? -1 : 0) : this.cmdSelIndex + (evt.key === "ArrowDown" ? 1 : -1)) + n) % n;
+          this.renderCmdSelection();
+        }
       }
     });
     this.inputEl.addEventListener("input", () => {
       this.autosize();
       this.callbacks.onInputChanged();
       this.refreshRefPanel();
+      this.refreshCmdPanel();
     });
 
     const row = card.createDiv({ cls: "dshc-row" });
@@ -229,8 +263,8 @@ export class ChatComposer {
     this.inputEl.setAttribute(
       "placeholder",
       tt(
-        "描述你的想法，或输入 @ 添加上下文",
-        "Describe what you want, or type @ to add context",
+        "描述你的想法，输入 @ 引用文件，输入 / 查看命令与技能",
+        "Describe what you want — type @ to reference files, or / for commands and skills",
       ),
     );
     for (const item of Array.from(this.modeMenuEl.children) as HTMLElement[]) {
@@ -350,6 +384,11 @@ export class ChatComposer {
     if (!this.refPanelEl.hasAttribute("hidden")) {
       if (!this.refPanelEl.contains(target) && !this.inputEl.contains(target)) {
         this.closeRefPanel();
+      }
+    }
+    if (this.cmdPanelEl && !this.cmdPanelEl.hasAttribute("hidden")) {
+      if (!this.cmdPanelEl.contains(target) && !this.inputEl.contains(target)) {
+        this.closeCmdPanel();
       }
     }
   }
@@ -620,6 +659,168 @@ export class ChatComposer {
     this.inputEl.setSelectionRange(caret, caret);
     this.inputEl.focus();
     this.closeRefPanel();
+    this.autosize();
+    this.callbacks.onInputChanged();
+  }
+
+  // --------------------------------------------------- `/` command picker
+  /**
+   * Adopt the command registry payload. Any open panel is re-rendered live so
+   * a slow bridge answer never shows a stale one-command list.
+   */
+  applyCommands(commands: CommandInfo[], unsupported: boolean): void {
+    this.cmdEntries = unsupported ? [] : commands;
+    this.cmdIndex = new Map(this.cmdEntries.map((c) => [c.name, c]));
+    if (this.cmdPanelOpen()) this.renderCmdList();
+  }
+
+  /** Adopt the skill catalog payload (same live-refresh rule as commands). */
+  applySkills(skills: SkillInfo[], unsupported: boolean): void {
+    this.skillEntries = unsupported ? [] : skills;
+    if (this.cmdPanelOpen()) this.renderCmdList();
+  }
+
+  /**
+   * Resolve one `/name` token against the known command registry. `null` when
+   * the head word is unknown — the view then routes the line to the model
+   * (which is how dsh treats skill gestures and unregistered phrases).
+   */
+  findCommand(name: string): CommandInfo | null {
+    return this.cmdIndex.get(name) ?? null;
+  }
+
+  /** Locate the `/` token under the caret, if any (same grammar as @). An
+   * empty query is a valid picker trigger: bare `/` opens the full list. */
+  private cmdToken(): { start: number; caret: number; query: string } | null {
+    const v = this.inputEl.value;
+    const caret = this.inputEl.selectionStart ?? v.length;
+    const prefix = v.slice(0, caret);
+    const bare = prefix.match(/(?:^|\s)\/([a-z0-9][^\s/]*)?$/i);
+    if (!bare) return null;
+    return { start: bare.index! + bare[0].indexOf("/"), caret, query: bare[1] ?? "" };
+  }
+
+  private cmdPanelOpen(): boolean {
+    return !this.cmdPanelEl.hasAttribute("hidden");
+  }
+
+  private openCmdPanel(): void {
+    if (!this.cmdRequested) {
+      this.cmdRequested = true;
+      void this.plugin.sendCommand({ cmd: "list_commands" });
+      void this.plugin.sendCommand({ cmd: "list_skills" });
+    }
+    this.closeRefPanel();
+    this.cmdPanelEl.removeAttribute("hidden");
+    this.renderCmdList();
+  }
+
+  private closeCmdPanel(): void {
+    if (this.cmdPanelEl && !this.cmdPanelEl.hasAttribute("hidden")) {
+      this.cmdPanelEl.setAttribute("hidden", "");
+    }
+    // Re-arm the fetch so the next open pulls fresh registry / catalog state.
+    this.cmdRequested = false;
+    this.cmdSelIndex = -1;
+    this.cmdFiltered = [];
+  }
+
+  /** Open/update the panel to follow the current `/` token. */
+  private refreshCmdPanel(): void {
+    const tok = this.cmdToken();
+    if (!tok) {
+      this.closeCmdPanel();
+      return;
+    }
+    this.openCmdPanel();
+  }
+
+  /** One row: `/name` plus one-line description. */
+  private appendCmdItem(kind: "command" | "skill", name: string, description: string): HTMLButtonElement {
+    const row = this.cmdListEl.createEl("button", {
+      cls: "dshc-cmd-item",
+      attr: { type: "button", "data-kind": kind },
+    });
+    row.createSpan({ cls: "dshc-cmd-name mono", text: `/${name}` });
+    row.createSpan({ cls: "dshc-cmd-desc", text: previewLine(description) });
+    row.addEventListener("click", () => this.insertCmd(kind, name));
+    return row;
+  }
+
+  /** Rebuild the panel rows for the current query; keep selection in range. */
+  private renderCmdList(): void {
+    this.cmdListEl.empty();
+    const tok = this.cmdToken();
+    const query = (tok?.query ?? "").toLowerCase();
+
+    const commands = this.cmdEntries.filter((c) => c.name.startsWith(query) || c.name.includes(query));
+    const skills = this.skillEntries.filter(
+      (s) => s.userInvocable && (s.name.startsWith(query) || s.name.includes(query)),
+    );
+
+    this.cmdFiltered = [
+      ...commands.map((c) => ({ kind: "command" as const, name: c.name })),
+      ...skills.map((s) => ({ kind: "skill" as const, name: s.name })),
+    ];
+
+    if (this.cmdEntries.length === 0 && this.skillEntries.length === 0) {
+      this.cmdListEl.createDiv({
+        cls: "dshc-cmd-empty",
+        text: tt("当前 dsh 不提供命令 / 技能", "No commands or skills available in this dsh"),
+      });
+      this.cmdSelIndex = -1;
+      return;
+    }
+    if (commands.length > 0) {
+      this.cmdListEl.createDiv({ cls: "dshc-cmd-section", text: tt("命令", "Commands") });
+      for (const c of commands) this.appendCmdItem("command", c.name, c.description);
+    }
+    if (skills.length > 0) {
+      this.cmdListEl.createDiv({ cls: "dshc-cmd-section", text: tt("技能", "Skills") });
+      for (const s of skills) this.appendCmdItem("skill", s.name, s.description);
+    }
+    if (this.cmdFiltered.length === 0) {
+      this.cmdListEl.createDiv({
+        cls: "dshc-cmd-empty",
+        text: tt("无匹配的命令或技能", "No matching commands or skills"),
+      });
+      this.cmdSelIndex = -1;
+      return;
+    }
+    if (this.cmdSelIndex >= this.cmdFiltered.length) this.cmdSelIndex = -1;
+    this.renderCmdSelection();
+  }
+
+  /** Repaint just the `.selected` highlight (keyboard navigation). */
+  private renderCmdSelection(): void {
+    const rows = Array.from(this.cmdListEl.querySelectorAll<HTMLButtonElement>(".dshc-cmd-item"));
+    rows.forEach((row, i) => {
+      row.toggleClass("selected", i === this.cmdSelIndex);
+      row.setAttribute("aria-selected", i === this.cmdSelIndex ? "true" : "false");
+    });
+    const cur = this.cmdFiltered[this.cmdSelIndex];
+    if (cur) {
+      const row = rows.find((r) => r.getAttribute("data-kind") === cur.kind && r.textContent?.includes(`/${cur.name}`));
+      row?.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  /** Enter on a picked row: insert `/name ` and close (mirrors dsh web). */
+  private chooseCmdSelection(): void {
+    const picked = this.cmdFiltered[this.cmdSelIndex];
+    if (!picked) return;
+    this.insertCmd(picked.kind, picked.name);
+  }
+
+  private insertCmd(kind: "command" | "skill", name: string): void {
+    const tok = this.cmdToken();
+    if (!tok) return;
+    const v = this.inputEl.value;
+    this.inputEl.value = v.slice(0, tok.start) + `/${name} ` + v.slice(tok.caret);
+    const caret = tok.start + name.length + 2;
+    this.inputEl.setSelectionRange(caret, caret);
+    this.inputEl.focus();
+    this.closeCmdPanel();
     this.autosize();
     this.callbacks.onInputChanged();
   }

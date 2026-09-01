@@ -113,6 +113,51 @@ export interface SessionCreatedEvent {
   model: string;
 }
 
+// -------------------------------------------------------- slash commands
+/** One row of the `/` picker's command section (dsh `commands` registry). */
+export interface CommandInputDescriptor {
+  hint?: string;
+  images?: boolean;
+}
+
+export interface CommandInfo {
+  name: string;
+  description: string;
+  input: CommandInputDescriptor | null;
+}
+
+/** One row of the `/` picker's skill section (dsh SkillRegistry). */
+export interface SkillInfo {
+  name: string;
+  description: string;
+  provider: string;
+  userInvocable: boolean;
+}
+
+export interface CommandsEvent {
+  t: "commands";
+  commands: CommandInfo[];
+  /** True when this dsh base ships no command registry — the picker degrades. */
+  unsupported?: boolean;
+}
+
+export interface SkillsEvent {
+  t: "skills";
+  skills: SkillInfo[];
+  /** True when this dsh base ships no skill registry — the picker degrades. */
+  unsupported?: boolean;
+}
+
+export type CommandResultKind = "success" | "error" | "miss" | "unsupported";
+
+export interface CommandResultEvent {
+  t: "command_result";
+  id: string | null;
+  name: string;
+  kind: CommandResultKind;
+  text?: string;
+}
+
 export type DshEvent =
   | ReadyEvent
   | TurnStartEvent
@@ -126,6 +171,9 @@ export type DshEvent =
   | ModelsEvent
   | SessionsEvent
   | SessionOpenedEvent
-  | SessionCreatedEvent;
+  | SessionCreatedEvent
+  | CommandsEvent
+  | SkillsEvent
+  | CommandResultEvent;
 
 export type BridgeStatus = "stopped" | "connecting" | "ready" | "running";

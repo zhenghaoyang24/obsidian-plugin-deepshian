@@ -522,7 +522,8 @@
   line-height: 24px;
   font-weight: 400;
 }
-.dshc-title.mono {
+.dshc-title.mono,
+.dshc-cmd-name.mono {
   font-family: var(--font-monospace);
   font-size: 12px;
 }
@@ -1241,7 +1242,8 @@
 
 /* @ file-reference panel, anchored to the top edge of the composer card so it
  * sits flush above the input box at exactly the input box's width */
-.dshc-refpanel {
+.dshc-refpanel,
+.dshc-cmdpanel {
   position: absolute;
   bottom: 100%;
   left: 0;
@@ -1256,7 +1258,8 @@
   border-radius: 10px;
   box-shadow: var(--shadow-s);
 }
-.dshc-refpanel[hidden] {
+.dshc-refpanel[hidden],
+.dshc-cmdpanel[hidden] {
   display: none;
 }
 .dsh-chat .dshc-refsearch {
@@ -1335,6 +1338,57 @@
   color: var(--dshc-label-tertiary);
 }
 .dshc-ref-empty {
+  padding: 8px 10px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+/* `/` command / skill picker panel — same dock as the @ panel */
+.dshc-cmd-list {
+  overflow-y: auto;
+  padding: 4px 6px 6px;
+}
+.dsh-chat .dshc-cmd-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 8px;
+  box-shadow: none;
+  background: transparent;
+  font-size: var(--font-ui-small);
+  text-align: left;
+  cursor: pointer;
+}
+.dsh-chat .dshc-cmd-item:hover,
+.dsh-chat .dshc-cmd-item.selected,
+.dsh-chat .dshc-cmd-item:focus-visible {
+  background: var(--dshc-interactive-hover);
+}
+.dshc-cmd-name {
+  flex: none;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-normal);
+}
+.dshc-cmd-desc {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+.dshc-cmd-section {
+  padding: 7px 8px 3px;
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--dshc-label-tertiary);
+}
+.dshc-cmd-empty {
   padding: 8px 10px;
   color: var(--text-muted);
   font-size: var(--font-ui-small);

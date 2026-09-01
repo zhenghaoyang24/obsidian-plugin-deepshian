@@ -281,6 +281,28 @@ export class ChatConversation {
     this.scrollBottom();
   }
 
+  /**
+   * A locally executed `/command` settled (success / error). Rendered as a
+   * finished disclosure card in the same family as tool cards: title
+   * `/name`, summary ok/failed, result text in a visible pre when present.
+   */
+  pushCommand(name: string, kind: string, text: string): void {
+    const root = this.columnEl.createDiv({ cls: "dshc-item" });
+    const details = this.buildToolCard(root, `/${name}`, {});
+    const isError = kind === "error";
+    details.setAttribute("data-state", isError ? "error" : "ok");
+    details.querySelector(".dshc-dot")?.setAttribute("data-state", isError ? "error" : "ok");
+    details.querySelector<HTMLElement>(".dshc-sum")?.setText(
+      isError ? tt("失败", "failed") : text ? previewLine(text) : tt("完成", "done"),
+    );
+    const pre = details.querySelector<HTMLPreElement>(".dshc-pre.dshc-output");
+    if (pre && text) {
+      pre.removeAttribute("style");
+      pre.textContent = text;
+    }
+    this.scrollBottom();
+  }
+
   // ------------------------------------------------------------- rendering
   private startClock(entry: AssistantEntry): void {
     this.turnStartedAt = Date.now();
