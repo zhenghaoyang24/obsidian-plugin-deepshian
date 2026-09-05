@@ -14,3 +14,7 @@ Thumbs.db
 # Editor state
 .idea/
 .vscode/
+
+# agent
+.workbuddy/
+.agents/
