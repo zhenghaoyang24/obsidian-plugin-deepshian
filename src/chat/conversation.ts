@@ -275,6 +275,24 @@ export class ChatConversation {
     this.scrollBottom();
   }
 
+  /**
+   * The replayed session is still streaming: bind its last card as the live
+   * target so incoming deltas keep appending to it. When the in-flight turn
+   * has not produced output yet there is no assistant card at all — open one,
+   * which also restores the "Thinking…" shimmer and the clock for it.
+   */
+  resumeStreaming(): void {
+    const last = this.entries[this.entries.length - 1];
+    if (last?.kind === "assistant") {
+      this.currentAssistant = last;
+      // The replay already finalized this card (shimmer removed, footer
+      // revealed); keep it as-is and let the stream continue filling it.
+    } else {
+      this.pushAssistant();
+    }
+    this.scrollBottom();
+  }
+
   pushSystemNote(message: string): void {
     const note = this.columnEl.createDiv({ cls: "dsh-system" });
     note.setText(message);

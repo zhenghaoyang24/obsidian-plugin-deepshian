@@ -5,6 +5,7 @@ import { t as tt } from "../i18n";
 import { ChatConversation } from "./conversation";
 import { ChatComposer } from "./composer";
 import { ChatHeader } from "./header";
+import { eventSession } from "./utils";
 import type DshBridgePlugin from "../main";
 import type { BridgeStatus, ChatMode, DshEvent, SessionSummary } from "../bridge/types";
 
@@ -20,6 +21,12 @@ export const VIEW_TYPE_DSH_CHAT = "dsh-chat-view";
  * Owns the bridge-facing session state (active session, title, sessions
  * cache, auto-resume) and delegates the three DOM regions to ChatHeader,
  * ChatConversation and ChatComposer.
+ *
+ * The bridge runs a pool of agents: "active" only means the session on screen.
+ * Sessions with a turn in flight keep streaming in the background — their
+ * events are filtered out here (the bridge accumulates them in its live log)
+ * and are replayed in full when the user switches back. `runningIds` tracks
+ * which sessions are busy so the history list can badge them.
  */
 export class DshChatView extends ItemView {
   private header!: ChatHeader;
@@ -29,6 +36,8 @@ export class DshChatView extends ItemView {
   // session sync state
   private sessionsCache: SessionSummary[] = [];
   private activeSessionId = "";
+  /** Sessions with a turn in flight right now (badge + per-session gating). */
+  private runningIds = new Set<string>();
   /** Current session title, resolved by id against the latest sessions payload. */
   private currentSessionTitle = "";
   private sessionsRefreshTimer: number | null = null;
@@ -62,7 +71,6 @@ export class DshChatView extends ItemView {
     this.header = new ChatHeader(this.contentEl, this.plugin, {
       onNewChat: () => this.startNewChat(),
       onOpenSession: (id) => void this.plugin.sendCommand({ cmd: "open_session", id }),
-      isBusy: () => this.isBusy(),
     });
     this.header.build();
 
@@ -72,10 +80,10 @@ export class DshChatView extends ItemView {
     this.composer = new ChatComposer(this.contentEl, this.plugin, {
       onSend: (text, mode) => this.sendCurrentInput(text, mode),
       onStopRequest: () => {
-        void this.plugin.sendCommand({ cmd: "stop" });
+        void this.plugin.sendCommand({ cmd: "stop", id: this.activeSessionId || undefined });
         new Notice(tt("已请求停止生成", "Stop requested"));
       },
-      isStreaming: () => this.conversation.current !== null,
+      isActiveBusy: () => this.isBusy(),
       onInputChanged: () => this.renderStatus(),
     });
     this.composer.build();
@@ -123,7 +131,10 @@ export class DshChatView extends ItemView {
   // ------------------------------------------------------------- external
   handleStatus(status: BridgeStatus, info?: string): void {
     if (status === "stopped") {
+      // The whole bridge died: no session can be running anymore.
+      this.runningIds.clear();
       this.conversation.abandonTurn();
+      this.header.renderSessions(this.activeSessionId);
     }
     if (status === "stopped" && info) {
       this.showBanner(info);
@@ -135,6 +146,20 @@ export class DshChatView extends ItemView {
   }
 
   handleEvent(event: DshEvent): void {
+    // Run-state pushes update the badge set no matter which conversation is on
+    // screen — that is what lets the history list light up a background task.
+    if (event.t === "session_status") {
+      if (event.running) this.runningIds.add(event.id);
+      else this.runningIds.delete(event.id);
+      this.header.renderSessions(this.activeSessionId);
+      this.renderStatus();
+      return;
+    }
+    // Turn-scoped events render only in the conversation they belong to. A
+    // background session's stream is kept by the bridge's live agent log and
+    // replayed in full (streaming continues) when the user switches back.
+    const sid = eventSession(event);
+    if (sid != null && sid !== "" && sid !== this.activeSessionId) return;
     switch (event.t) {
       case "turn_start":
         this.conversation.pushAssistant();
@@ -194,9 +219,15 @@ export class DshChatView extends ItemView {
       case "sessions": {
         const archivedId = event.archived ?? "";
         this.sessionsCache = event.sessions;
+        // Poll-path refresh of the run-state badges (session_status pushes
+        // keep them live between listings).
+        this.runningIds = new Set(
+          event.sessions.filter((s) => s.running === true).map((s) => s.id),
+        );
         this.header.setSessions(event.sessions);
         this.refreshCurrentTitle();
         this.header.renderSessions(this.activeSessionId);
+        this.renderStatus();
         if (archivedId) {
           if (archivedId === this.activeSessionId) {
             // dsh web parity: archiving the current selection clears it to
@@ -229,6 +260,17 @@ export class DshChatView extends ItemView {
         this.header.closeHistory();
         this.header.clearPendingRows();
         this.conversation.renderReplay(event.turns);
+        // A session that is still streaming resumes on screen: bind the last
+        // replayed card as the live streaming target (or open a fresh one when
+        // the turn has not produced output yet) so the following deltas keep
+        // appending instead of being dropped.
+        if (event.running === true) {
+          this.runningIds.add(event.id);
+          this.conversation.resumeStreaming();
+        } else {
+          this.runningIds.delete(event.id);
+        }
+        this.renderStatus();
         if (!opened) {
           new Notice(
             tt("已打开历史会话（上下文完整恢复）", "Session resumed with full context"),
@@ -339,14 +381,32 @@ export class DshChatView extends ItemView {
     void this.plugin.sendCommand({ cmd: "open_session", id: target.id });
   }
 
-  /** A turn is streaming or the bridge is still coming up. */
+  /** Whether the session on screen has a turn in flight. */
+  private activeSessionRunning(): boolean {
+    return this.activeSessionId !== "" && this.runningIds.has(this.activeSessionId);
+  }
+
+  /**
+   * A turn is streaming on screen, its session is marked running, or the
+   * bridge is still coming up. A background session running elsewhere must
+   * NOT block the composer — that is the entire point of the agent pool.
+   */
   private isBusy(): boolean {
-    const status = this.plugin.bridgeStatus();
     return (
       this.conversation.current !== null ||
-      status === "running" ||
-      status === "connecting"
+      this.activeSessionRunning() ||
+      this.plugin.bridgeStatus() === "connecting"
     );
+  }
+
+  /**
+   * Status as it concerns the session on screen: the chip and the send button
+   * reflect THIS conversation's turn, not "some session in the pool runs".
+   */
+  private effectiveStatus(): BridgeStatus {
+    const status = this.plugin.bridgeStatus();
+    if (status === "stopped" || status === "connecting") return status;
+    return this.activeSessionRunning() ? "running" : "ready";
   }
 
   /**
@@ -375,9 +435,10 @@ export class DshChatView extends ItemView {
   }
 
   private renderStatus(): void {
-    const status = this.plugin.bridgeStatus();
-    const running = status === "running" || this.conversation.current !== null;
+    const status = this.effectiveStatus();
+    const running = this.isBusy();
     this.header.renderStatus(status);
+    this.header.renderRunningCount(this.runningIds.size);
     this.composer.renderStatus(status, running);
   }
 

@@ -39,6 +39,19 @@ describe("DshBridge.handleLine", () => {
     expect(onStatus).toHaveBeenCalledWith("ready", "m");
   });
 
+  it("stays running while any pooled session still has an open turn", () => {
+    const { onStatus, handleLine } = makeBridge();
+    handleLine(JSON.stringify({ t: "ready", model: "m" }));
+    onStatus.mockClear();
+    handleLine(JSON.stringify({ t: "turn_start", session: "a" }));
+    handleLine(JSON.stringify({ t: "turn_start", session: "b" }));
+    // Session a settles; b is still streaming, so the pool stays running.
+    handleLine(JSON.stringify({ t: "turn_end", session: "a", reason: "completed" }));
+    expect(onStatus).not.toHaveBeenCalledWith("ready", expect.anything());
+    handleLine(JSON.stringify({ t: "turn_end", session: "b", reason: "completed" }));
+    expect(onStatus).toHaveBeenCalledWith("ready", "m");
+  });
+
   it("does not flip status back to ready when not running", () => {
     const { onEvent, onStatus, handleLine } = makeBridge();
     handleLine(JSON.stringify({ t: "turn_end", reason: "completed" }));

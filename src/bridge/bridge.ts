@@ -23,6 +23,8 @@ export class DshBridge {
   model = "";
   lastStderrTail: string[] = [];
 
+  /** Turns started but not yet ended across the whole agent pool. */
+  private openTurns = 0;
   private child: ChildProcess | null = null;
   private stdoutBuf = "";
   private opts: BridgeOptions | null = null;
@@ -33,6 +35,7 @@ export class DshBridge {
     this.stop();
     this.opts = opts;
     this.lastStderrTail = [];
+    this.openTurns = 0;
     const shell = process.platform === "win32";
     let child: ChildProcess;
     try {
@@ -115,6 +118,7 @@ export class DshBridge {
     }
     this.status = "stopped";
     this.model = "";
+    this.openTurns = 0;
     this.handlers.onStatus("stopped");
   }
 
@@ -164,12 +168,23 @@ export class DshBridge {
         this.handlers.onStatus("ready", event.model);
         break;
       case "turn_start":
+        // Several sessions can stream at once (agent pool); the pool only
+        // reads "ready" again when the LAST open turn settles.
+        this.openTurns += 1;
         this.status = "running";
         this.handlers.onStatus("running");
         break;
       case "turn_end":
+        this.openTurns = Math.max(0, this.openTurns - 1);
+        if (this.status === "running" && this.openTurns === 0) {
+          this.status = "ready";
+          this.handlers.onStatus("ready", this.model);
+        }
+        break;
       case "error":
-        if (this.status === "running") {
+        // Control-op failures also surface as `error`; only treat it as a
+        // turn boundary when nothing is actually streaming.
+        if (this.status === "running" && this.openTurns === 0) {
           this.status = "ready";
           this.handlers.onStatus("ready", this.model);
         }

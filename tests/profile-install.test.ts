@@ -56,6 +56,14 @@ describe("profile/install", () => {
     expect(patchPathHealthy(PROFILE)).toBe(false);
   });
 
+  it("patchPathHealthy: false when the installed bridge predates the bundled one", () => {
+    // Plugin updated but the profile still carries the previous bridge: the
+    // content check must flag it so checkProfile() silently reinstalls.
+    installProfile(PROFILE);
+    writeFileSync(join(profileDir(PROFILE), BRIDGE_FILE), "// stale bridge\n");
+    expect(patchPathHealthy(PROFILE)).toBe(false);
+  });
+
   it("patchPathHealthy: false when the profile is missing", () => {
     expect(patchPathHealthy(PROFILE)).toBe(false);
   });

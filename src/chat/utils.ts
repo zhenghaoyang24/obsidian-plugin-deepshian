@@ -1,4 +1,27 @@
-import type { ModelSelection } from "../bridge/types";
+import type { DshEvent, ModelSelection } from "../bridge/types";
+
+/**
+ * The session a turn-scoped event belongs to, or undefined for events that are
+ * not scoped to a conversation (models / sessions / commands listings). The
+ * sidebar uses this to drop another session's stream while it is on screen —
+ * background turns keep running and are replayed in full on switch-back.
+ */
+export function eventSession(event: DshEvent): string | undefined {
+  if (
+    event.t === "turn_start" ||
+    event.t === "text" ||
+    event.t === "reasoning" ||
+    event.t === "tool_use" ||
+    event.t === "tool_result" ||
+    event.t === "usage" ||
+    event.t === "turn_end" ||
+    event.t === "error" ||
+    event.t === "command_result"
+  ) {
+    return event.session;
+  }
+  return undefined;
+}
 
 /** One-line human preview used by tool summaries and reasoning titles. */
 export function previewLine(text: string): string {

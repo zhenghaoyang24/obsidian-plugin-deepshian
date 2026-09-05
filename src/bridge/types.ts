@@ -13,23 +13,29 @@ export interface ReadyEvent {
 }
 export interface TurnStartEvent {
   t: "turn_start";
+  /** Emitting session; absent only from events raised outside any session. */
+  session?: string;
 }
 export interface TextEvent {
   t: "text";
+  session?: string;
   delta: string;
 }
 export interface ReasoningEvent {
   t: "reasoning";
+  session?: string;
   delta: string;
 }
 export interface ToolUseEvent {
   t: "tool_use";
+  session?: string;
   callId?: string;
   name?: string;
   input: unknown;
 }
 export interface ToolResultEvent {
   t: "tool_result";
+  session?: string;
   callId?: string;
   isError: boolean;
   output: string;
@@ -37,15 +43,19 @@ export interface ToolResultEvent {
 }
 export interface UsageEvent {
   t: "usage";
+  session?: string;
   usage: Record<string, number>;
 }
 export interface TurnEndEvent {
   t: "turn_end";
+  session?: string;
   reason: string;
   error?: string;
 }
 export interface ErrorEvent {
   t: "error";
+  /** Set when the failure belongs to one session's turn. */
+  session?: string;
   message: string;
   stack?: string;
 }
@@ -73,7 +83,10 @@ export interface SessionSummary {
   id: string;
   title?: string;
   updatedAt?: number;
+  /** True when this session has a mounted agent in the bridge process. */
   live?: boolean;
+  /** True while the session has an unfinished turn streaming right now. */
+  running?: boolean;
 }
 
 export interface SessionsEvent {
@@ -82,6 +95,18 @@ export interface SessionsEvent {
   cwd?: string;
   /** Echoed by the bridge when this payload answers an archive_session command. */
   archived?: string;
+}
+
+/**
+ * Push notification for one session's run state. Emitted the moment a turn
+ * starts or settles, so the sidebar can light up a background session without
+ * waiting for the next `sessions` listing.
+ */
+export interface SessionStatusEvent {
+  t: "session_status";
+  id: string;
+  running: boolean;
+  live: boolean;
 }
 
 /** One folded turn of a restored session's persisted history. */
@@ -104,6 +129,12 @@ export interface SessionOpenedEvent {
   id: string;
   model: string;
   turns: ReplayTurn[];
+  /**
+   * True when this session still has a turn in flight: the last replayed turn
+   * is unfinished, so the sidebar must keep streaming into it instead of
+   * treating the replay as finished history.
+   */
+  running?: boolean;
 }
 
 /** A fresh session was minted lazily (first prompt of a new conversation). */
@@ -152,6 +183,7 @@ export type CommandResultKind = "success" | "error" | "miss" | "unsupported";
 
 export interface CommandResultEvent {
   t: "command_result";
+  session?: string;
   id: string | null;
   name: string;
   kind: CommandResultKind;
@@ -174,6 +206,7 @@ export type DshEvent =
   | SessionCreatedEvent
   | CommandsEvent
   | SkillsEvent
+  | SessionStatusEvent
   | CommandResultEvent;
 
 export type BridgeStatus = "stopped" | "connecting" | "ready" | "running";

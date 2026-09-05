@@ -60,13 +60,18 @@ export function detectProfile(name: string): boolean {
   );
 }
 
-/** True when the installed patch points at this machine's bridge file. */
+/**
+ * True when the installed profile is up to date for THIS build: the patch
+ * points at this machine's bridge file AND that file matches the bridge source
+ * embedded in main.js. The content check is what makes plugin updates refresh
+ * the bridge — without it an old protocol keeps running against a new UI.
+ */
 export function patchPathHealthy(name: string): boolean {
-  const file = join(profileDir(name), "cordis.patch.yml");
+  const dir = profileDir(name);
   try {
-    return readFileSync(file, "utf8").includes(
-      fileUri(join(profileDir(name), BRIDGE_FILE)),
-    );
+    const patch = readFileSync(join(dir, "cordis.patch.yml"), "utf8");
+    if (!patch.includes(fileUri(join(dir, BRIDGE_FILE)))) return false;
+    return readFileSync(join(dir, BRIDGE_FILE), "utf8") === bridgeSource;
   } catch {
     return false;
   }

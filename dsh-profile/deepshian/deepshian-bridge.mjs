@@ -1,36 +1,42 @@
-// DeepSeek Harness 闁?Obsidian bridge runner.
+// DeepSeek Harness ↔Obsidian bridge runner.
 // A Cordis plugin (inserted by the `deepshian` profile's cordis.patch.yml) that
 // drives the real dsh Agent core and exposes it as a tiny, stable JSONL protocol
 // over stdio:
 //
-//   inbound (plugin 闁?dsh), one JSON object per line:
+//   inbound (plugin ↔dsh), one JSON object per line:
 //     {"prompt":"...","mode":"writable"|"readonly"}
 //     {"cmd":"list_models"}
 //     {"cmd":"set_model","provider":"...","model":"..."}
 //     {"cmd":"list_sessions"}
 //     {"cmd":"open_session","id":"<sessionId>"}
-//     {"cmd":"new_chat"}                    drop the live agent; next prompt mints a session
+//     {"cmd":"new_chat"}                    detach the sidebar; running sessions KEEP running
+//     {"cmd":"stop","id":"<sessionId>"?}    cancel one session's turn (default: the active one)
 //     {"cmd":"archive_session","id":"<sessionId>"}   archive durably (the SAME global set dsh web maintains)
 //     {"cmd":"list_commands"}               the `/` picker's command registry (same service dsh web)
 //     {"cmd":"execute_command","line":"/goal ..."}   run a slash command locally, no model round-trip
 //     {"cmd":"list_skills"}                 the `/` picker's skill catalog (same provider dsh web)
 //
-//   outbound (dsh 闁?plugin), one JSON object per line:
+//   outbound (dsh ↔plugin), one JSON object per line:
 //     {"t":"ready","model":"...","cwd":"..."}   (boots WITHOUT a session)
 //     {"t":"models","current":{"provider","model"},"models":[{provider,id,name}]}
-//     {"t":"sessions","sessions":[{id,title,updatedAt,live}],"archived":"<id>"}
+//     {"t":"sessions","sessions":[{id,title,updatedAt,live,running}],"archived":"<id>"}
 //         (deleted + archived excluded; `archived` echoes the id an archive_session answered)
-//     {"t":"session_opened","id":"...","model":"...","turns":[{user,assistant,tools:[...]}]}
+//     {"t":"session_status","id","running","live"}  pushed the instant a turn starts or settles
+//     {"t":"session_opened","id":"...","model":"...","running":bool,"turns":[{user,assistant,tools:[...]}]}
 //     {"t":"session_created","id":"...","model":"..."}   lazy mint on the first prompt
 //     {"t":"commands","commands":[{"name","description","input"}],"unsupported?":true}
 //     {"t":"skills","skills":[{"name","description","provider","userInvocable"}],"unsupported?":true}
 //     {"t":"command_result","id","name","kind":"success"|"error"|"miss"|"unsupported","text"?}
-//     {"t":"turn_start"} {"t":"turn_end",...} {"t":"error",...}
-//     {"t":"text"/"reasoning"/"tool_use"/"tool_result"/"usage"} (same as before)
+//     {"t":"turn_start"|"text"|"reasoning"|"tool_use"|"tool_result"|"usage"|"turn_end"|"error",
+//      "session":"<sessionId>", ...}
+//
+//   Every turn-scoped event carries the emitting session's id: the bridge runs
+//   a POOL of live agents, so several conversations can stream at once and the
+//   sidebar routes each line to the conversation it belongs to.
 //
 // Sessions persist through the shared `$DSH_HOME/sessions` JSONL backend, keyed
 // by project directory, so every conversation driven here is the SAME durable
-// record dsh web lists for this workspace 闁?open either surface against the
+// record dsh web lists for this workspace ↔open either surface against the
 // same vault and you see one shared history. Etiquette: treat a session as
 // single-writer; switch ownership here before continuing it in dsh web.
 //
@@ -49,11 +55,15 @@
 //
 // A session is minted LAZILY, only when the first real prompt is sent: booting
 // the bridge, opening the sidebar, or clicking "new chat" never registers an
-// empty conversation in the shared session store. The process keeps multi-turn
-// memory inside one live Agent; switching to an older session resumes it
-// through `agents.resume` (same log, full context), disposes the previously
-// live agent, and replays its persisted events back to the sidebar as compact
-// `turns`.
+// empty conversation in the shared session store.
+//
+// The bridge keeps a POOL of live agents (one per open session), so starting a
+// new chat or switching conversations never interrupts a turn that is already
+// streaming — dsh web behaves the same way. "Active" only means "the session
+// the sidebar is currently displaying"; every other session in the pool keeps
+// running in the background, and its events keep flowing out tagged with its
+// id. Switching back replays the live agent's in-memory log (which includes
+// the still-open turn) and the stream simply continues from there.
 
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -226,25 +236,31 @@ async function adoptVaultWorkspace(doc, vaultCanon, rows, resolve, nowIso) {
   return changed;
 }
 
-/** Map one streaming session event onto the flat JSONL protocol. */
-function mapEvent(event) {
+/**
+ * Map one streaming session event onto the flat JSONL protocol. `sid` is the
+ * emitting session, stamped on every event so a sidebar watching another
+ * conversation can tell whose turn a line belongs to.
+ */
+function mapEvent(event, sid) {
   const d = event.data;
+  const at = sid ? { session: sid } : {};
   switch (event.type) {
     case "turn/start":
-      emit({ t: "turn_start" });
+      emit({ t: "turn_start", ...at });
       break;
     case "assistant/chunk": {
       const c = d?.chunk;
       if (c == null) break;
-      if (c.type === "text-delta") emit({ t: "text", delta: c.text ?? "" });
-      else if (c.type === "reasoning-delta") emit({ t: "reasoning", delta: c.text ?? "" });
-      else if (c.type === "usage") emit({ t: "usage", usage: c.usage });
+      if (c.type === "text-delta") emit({ t: "text", ...at, delta: c.text ?? "" });
+      else if (c.type === "reasoning-delta") emit({ t: "reasoning", ...at, delta: c.text ?? "" });
+      else if (c.type === "usage") emit({ t: "usage", ...at, usage: c.usage });
       break;
     }
     case "tool/call":
       // Dedicated start-marker per tool invocation; arguments is a JSON string.
       emit({
         t: "tool_use",
+        ...at,
         callId: d?.callId,
         name: d?.name,
         input: parseArguments(d?.arguments),
@@ -258,6 +274,7 @@ function mapEvent(event) {
       const diffs = Array.isArray(d?.meta?.diffs) ? d.meta.diffs : [];
       emit({
         t: "tool_result",
+        ...at,
         callId,
         isError: first?.isError === true,
         output: textOf(first?.content),
@@ -268,6 +285,7 @@ function mapEvent(event) {
     case "turn/end":
       emit({
         t: "turn_end",
+        ...at,
         reason: d?.reason?.kind ?? "unknown",
         error: d?.reason?.error?.message,
       });
@@ -394,10 +412,100 @@ async function run(ctx) {
     assembled: void 0,
   };
 
-  /** One wire-up of the JSONL mapper scoped to the currently active session. */
-  let activeSessionId = "";
+  /**
+   * Agent pool: one live agent per open session, keyed by session id. This is
+   * what lets a turn keep streaming while the sidebar moves to another
+   * conversation. `activeId` only records which session the UI is displaying —
+   * it is NOT "the only session allowed to run".
+   *
+   * Concurrency is native: dsh's own AgentRegistry is a Map keyed by session
+   * id and holds as many agents as you create. The old code threw most of that
+   * away by disposing the previous agent on every switch.
+   */
+  const handles = new Map(); // sessionId -> { agent, dispose }
+  let activeId = "";
+  let opening = false; // session switch in flight
+
+  /** In-flight turn count per session; > 0 means "streaming right now". */
+  const pendingBySession = new Map();
+  /** Total in-flight turns — the stdin-EOF shutdown gate. */
+  let pending = 0;
+
+  /** Pool ceiling. Only idle, off-screen agents are ever evicted. */
+  const MAX_LIVE_AGENTS = 5;
+
+  function isRunning(id) {
+    if ((pendingBySession.get(id) ?? 0) > 0) return true;
+    return handles.get(id)?.agent?.status === "running";
+  }
+
+  /** Push one session's run state to the sidebar. */
+  function noteSessionStatus(id) {
+    emit({ t: "session_status", id: String(id), running: isRunning(id), live: handles.has(id) });
+  }
+
+  function markTurnStart(id) {
+    pending += 1;
+    const next = (pendingBySession.get(id) ?? 0) + 1;
+    pendingBySession.set(id, next);
+    if (next === 1) noteSessionStatus(id);
+  }
+
+  function markTurnEnd(id) {
+    const next = Math.max(0, (pendingBySession.get(id) ?? 1) - 1);
+    pendingBySession.set(id, next);
+    pending = Math.max(0, pending - 1);
+    if (next === 0) noteSessionStatus(id);
+  }
+
+  /** Drop one agent from the pool. Callers must settle its turn first. */
+  function disposeSession(id) {
+    const h = handles.get(id);
+    if (!h) return false;
+    handles.delete(id);
+    if (activeId === id) activeId = "";
+    try {
+      h.dispose?.();
+    } catch {
+      /* prior agent already gone */
+    }
+    pendingBySession.delete(id);
+    noteSessionStatus(id);
+    return true;
+  }
+
+  /** Mark one session as most-recently used (Map order is the LRU order). */
+  function touch(id) {
+    const h = handles.get(id);
+    if (!h) return;
+    handles.delete(id);
+    handles.set(id, h);
+  }
+
+  /**
+   * Keep the pool bounded: evict the least-recently used agents that are idle
+   * and off-screen. A running session is never evicted — that is the entire
+   * point of the pool — and neither is the one the sidebar is showing. The
+   * session stays persisted, so opening it later simply resumes it.
+   */
+  function trimPool() {
+    if (handles.size <= MAX_LIVE_AGENTS) return;
+    for (const id of [...handles.keys()]) {
+      if (handles.size <= MAX_LIVE_AGENTS) break;
+      if (id === activeId || isRunning(id)) continue;
+      disposeSession(id);
+    }
+  }
+
+  /**
+   * One wire-up of the JSONL mapper for the whole pool. `session/event` is
+   * emitted per session scope, so a single root listener observes every
+   * conversation; the membership test drops events from sessions we do not
+   * own — notably subagents, which carry their own session ids.
+   */
   const disposeEventTap = ctx.on("session/event", (session, event) => {
-    if (session?.id !== activeSessionId) return;
+    const sid = String(session?.id ?? "");
+    if (sid === "" || !handles.has(sid)) return;
     const noisy =
       event.type === "assistant/chunk" &&
       ["text-delta", "reasoning-delta", "usage"].includes(event.data?.chunk?.type);
@@ -405,14 +513,16 @@ async function run(ctx) {
       emit({ t: "dbg", type: event.type, seq: event.seq, data: event.data });
     }
     try {
-      mapEvent(event);
+      mapEvent(event, sid);
     } catch (err) {
-      emit({ t: "error", message: `event map failed: ${String(err)}`, stack: String(err?.stack ?? "") });
+      emit({
+        t: "error",
+        session: sid,
+        message: `event map failed: ${String(err)}`,
+        stack: String(err?.stack ?? ""),
+      });
     }
   });
-
-  let handle = null; // { agent, dispose } for the live agent
-  let opening = false; // session switch in flight
 
   async function startFresh() {
     const sessionId = SessionId(`deepshian-${randomUUID()}`);
@@ -426,26 +536,27 @@ async function run(ctx) {
       },
     });
     await h.agent.whenIdle();
-    setActive(h, String(sessionId));
+    handles.set(String(sessionId), h);
+    activeId = String(sessionId);
+    trimPool();
     emit({
       t: "session_created",
       id: String(sessionId),
       model: `${selection.provider}/${selection.model}`,
     });
+    noteSessionStatus(String(sessionId));
     return h;
   }
 
-  function setActive(next, sessionId) {
-    const prev = handle;
-    handle = next;
-    activeSessionId = String(sessionId);
-    if (prev && prev !== next) {
-      try {
-        prev.dispose?.();
-      } catch {
-        /* prior agent already gone */
-      }
-    }
+  /** Point the sidebar at one pooled session (never disposes anything). */
+  function setActive(id) {
+    activeId = String(id);
+    touch(activeId);
+  }
+
+  /** The agent the sidebar is on, or null when there is nothing to talk to. */
+  function activeHandle() {
+    return activeId === "" ? null : handles.get(activeId) ?? null;
   }
 
   async function sendModels() {
@@ -643,14 +754,16 @@ async function run(ctx) {
         const titled = await sessionQuery.readTitleSnapshots(capped.map((r) => r.header.id));
         for (const row of titled) {
           if (row?.status !== "fulfilled") continue;
+          const id = row.value.session.id;
           out.push({
-            id: row.value.session.id,
+            id,
             title: row.value.title?.title ?? "",
             updatedAt:
               toMillis(row.value.title?.updatedAt) ??
               toMillis(row.value.session.createdAt) ??
               0,
-            live: mine.find((m) => m.header.id === row.value.session.id)?.live === true,
+            live: handles.has(id) || mine.find((m) => m.header.id === id)?.live === true,
+            running: isRunning(id),
           });
         }
       }
@@ -678,7 +791,7 @@ async function run(ctx) {
       return;
     }
     try {
-      const agent = handle?.agent ?? null;
+      const agent = activeHandle()?.agent ?? null;
       const descriptors = commands.list(agent);
       emit({
         t: "commands",
@@ -705,7 +818,8 @@ async function run(ctx) {
       return;
     }
     try {
-      const lookup = handle?.agent ? { scope: handle.agent } : {};
+      const agent = activeHandle()?.agent;
+      const lookup = agent ? { scope: agent } : {};
       const summaries = await skills.list(lookup);
       emit({
         t: "skills",
@@ -736,21 +850,27 @@ async function run(ctx) {
       emit({ t: "command_result", id: null, name: "", kind: "unsupported", text: "commands service unavailable" });
       return;
     }
-    if (!handle) await startFresh();
+    // A command IS activity, so a session-less bridge mints one here too.
+    const h = await ensureActive();
     const ac = new AbortController();
-    const executed = await commands.execute(handle.agent, line, [], ac.signal);
+    const executed = await commands.execute(h.agent, line, [], ac.signal);
     const name = (line.split(/\s+/)[0] ?? "").replace(/^\//, "");
     if (!executed) {
-      emit({ t: "command_result", id: null, name, kind: "miss" });
+      emit({ t: "command_result", session: activeId, id: null, name, kind: "miss" });
       return;
     }
     emit({
       t: "command_result",
+      session: activeId,
       id: String(executed.commandId),
       name,
       kind: executed.result.kind,
       ...(executed.result.text !== undefined ? { text: executed.result.text } : {}),
     });
+    // A command IS activity (it may even have minted the session), so its
+    // record must be durable exactly like a prompt's — otherwise the listing
+    // keeps filtering the session out as not-yet-persisted.
+    void durableFlush().catch(() => {});
   }
 
   /**
@@ -764,112 +884,128 @@ async function run(ctx) {
   async function archiveSessionCmd(rawId) {
     const id = String(rawId ?? "");
     if (!id) throw new Error("archive_session: missing id");
-    if (id === activeSessionId && pending > 0) {
-      throw new Error("a turn is still running; wait for it to finish");
+    // Archiving hides the session from every surface, so unlike a plain switch
+    // it DOES stop that session's work: a turn nobody can see must not keep
+    // burning tokens. Cancel it (so the turn ends durably) and drop the agent.
+    const pooled = handles.get(id);
+    if (pooled) {
+      try {
+        pooled.agent.cancel({ kind: "user" });
+        await pooled.agent.whenIdle();
+      } catch {
+        /* already settled */
+      }
     }
     await archiveSession(id);
-    if (id === activeSessionId) {
-      // Archiving must not leave a live agent writing into a hidden session.
-      await resetToNewChat();
+    disposeSession(id);
+    if (id === activeId) {
+      // dsh web parity: the sidebar falls back to a blank New Session, so a
+      // hidden session can never keep receiving prompts from this surface.
+      activeId = "";
     }
     await sendSessions(id);
   }
 
   async function openSession(id) {
-    const wanted = SessionId(String(id));
+    const wanted = String(id);
     if (opening) throw new Error("another session switch is already in progress");
-    if (pending > 0) throw new Error("a turn is still running; wait for it to finish");
     const selection = defaultModel.currentSelection();
+    const model = `${selection.provider}/${selection.model}`;
 
-    // Already active: reply immediately, folding the current session from disk.
-    if (activeSessionId === String(id)) {
-      let recs = [];
-      try {
-        recs = (await ctx.get("sessionPersistence")?.inspect?.(wanted))?.events ?? [];
-      } catch {}
+    // Already pooled: re-select it and replay its IN-MEMORY log, which is
+    // complete and includes a turn that is still streaming. No resume, no
+    // interruption — this is what makes switching away and back lossless.
+    const pooled = handles.get(wanted);
+    if (pooled) {
+      setActive(wanted);
       emit({
         t: "session_opened",
-        id: activeSessionId,
-        model: `${selection.provider}/${selection.model}`,
-        turns: foldHistory(recs),
+        id: wanted,
+        model,
+        running: isRunning(wanted),
+        turns: foldHistory(pooled.agent.session?.events ?? []),
       });
       return;
     }
-    if (handle && handle.agent?.status !== "idle") throw new Error("the agent is busy");
+
     opening = true;
     try {
-      // Durable state first: a freshly exited writer may not have drained.
-      await durableFlush().catch(() => {});
-      let persistedEvents = [];
-      try {
-        persistedEvents =
-          (await ctx.get("sessionPersistence")?.inspect?.(wanted))?.events ?? [];
-      } catch {}
-      let next;
-      try {
-        next = await agents.resume({
-          resumeSessionId: wanted,
-          agentOptions: { provider: selection.provider, model: selection.model },
-          setup: (agentCtx) => {
-            installModelSelection(agentCtx, liveSelection);
-          },
-        });
-      } catch (err) {
-        if (!/already registered/i.test(String(err?.message ?? err))) throw err;
-        const existing = agents.get(wanted);
-        if (!existing) throw err;
-        next = { agent: existing, dispose: void 0 }; // reuse the live registration
-      }
-      await next.agent.whenIdle();
-      if (persistedEvents.length === 0) {
-        try {
-          persistedEvents = next.agent.session?.events ?? [];
-        } catch {}
-      }
-      setActive(next, String(id));
+      const { events } = await resumeInto(wanted);
+      setActive(wanted);
+      trimPool();
       emit({
         t: "session_opened",
-        id: activeSessionId,
-        model: `${selection.provider}/${selection.model}`,
-        turns: foldHistory(persistedEvents),
+        id: wanted,
+        model,
+        running: isRunning(wanted),
+        turns: foldHistory(events),
       });
+      noteSessionStatus(wanted);
     } finally {
       opening = false;
     }
   }
 
   /**
-   * Drop the live agent without minting a new session. A "new chat" click
-   * (or the sidebar simply reopening) never creates an empty persisted record;
-   * the next real prompt lazily creates the session via `startFresh`.
-   * A running turn is cancelled and awaited first so its `turn_end` still
-   * reaches the sidebar (status returns to ready); `pending` is deliberately
-   * left alone — the turn's own `.finally` decrements it when `whenIdle`
-   * settles.
+   * Bring one persisted session back as a pooled agent. Split out of
+   * `openSession` so a prompt aimed at an evicted-but-still-selected session
+   * can silently re-resume it instead of starting an unrelated new one.
+   */
+  async function resumeInto(id) {
+    const wanted = SessionId(String(id));
+    const selection = defaultModel.currentSelection();
+    // Durable state first: a freshly exited writer may not have drained.
+    await durableFlush().catch(() => {});
+    let persistedEvents = [];
+    try {
+      persistedEvents =
+        (await ctx.get("sessionPersistence")?.inspect?.(wanted))?.events ?? [];
+    } catch {}
+    let next;
+    try {
+      next = await agents.resume({
+        resumeSessionId: wanted,
+        agentOptions: { provider: selection.provider, model: selection.model },
+        setup: (agentCtx) => {
+          installModelSelection(agentCtx, liveSelection);
+        },
+      });
+    } catch (err) {
+      if (!/already registered/i.test(String(err?.message ?? err))) throw err;
+      const existing = agents.get(wanted);
+      if (!existing) throw err;
+      next = { agent: existing, dispose: void 0 }; // reuse the live registration
+    }
+    await next.agent.whenIdle();
+    handles.set(String(id), next);
+    if (persistedEvents.length === 0) {
+      try {
+        persistedEvents = next.agent.session?.events ?? [];
+      } catch {}
+    }
+    return { handle: next, events: persistedEvents };
+  }
+
+  /**
+   * The agent a prompt or command should go to. Lazily mints a session when
+   * the sidebar sits on a blank New Session, and re-resumes one the pool has
+   * evicted while it was still on screen.
+   */
+  async function ensureActive() {
+    const h = activeHandle();
+    if (h) return h;
+    if (activeId !== "") return (await resumeInto(activeId)).handle;
+    return startFresh();
+  }
+
+  /**
+   * Detach the sidebar to a blank New Session. Deliberately touches nothing
+   * else: a "new chat" click must not cancel work in progress (that is dsh
+   * web's behavior and the whole point of the pool) and must not register an
+   * empty conversation — the next real prompt does that lazily.
    */
   async function resetToNewChat() {
-    const h = handle;
-    if (h) {
-      if (pending > 0 && h.agent) {
-        try {
-          h.agent.cancel({ kind: "user" });
-        } catch {
-          /* agent already settled */
-        }
-        try {
-          await h.agent.whenIdle();
-        } catch {
-          /* agent disposed mid-settle; nothing left to wait for */
-        }
-      }
-      try {
-        h.dispose?.();
-      } catch {
-        /* prior agent already gone */
-      }
-    }
-    handle = null;
-    activeSessionId = "";
+    activeId = "";
   }
 
   // The bridge boots WITHOUT a session: opening the sidebar or clicking
@@ -883,7 +1019,6 @@ async function run(ctx) {
   });
 
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
-  let pending = 0;
   let ops = 0; // in-flight async control operations (models/sessions/open)
   let quitting = false;
 
@@ -900,19 +1035,33 @@ async function run(ctx) {
     return op;
   }
 
-  /** Durably drain the persistence write-batch (graceful-exit safety net). */
+  /**
+   * Durably drain the persistence write-batch (graceful-exit safety net).
+   * Failures are contained, never propagated: the coordinator rejects when it
+   * was never initialized (e.g. EOF shutdown of a session-less bridge), and a
+   * crash there would kill the process with the tail still unwritten — the
+   * exact outcome this drain exists to prevent.
+   */
   function durableFlush() {
+    const contain = (err) => {
+      console.error("[deepshian] durable flush failed:", String(err?.message ?? err));
+      if (DEBUG) emit({ t: "dbg", type: "durable_flush_failed", data: String(err?.message ?? err) });
+    };
     const backend = ctx.get("sessionPersistence");
     const coord = backend?.coordinator;
     try {
-      if (coord && typeof coord.flush === "function") return Promise.resolve(coord.flush());
-    } catch {
-      /* fall through */
+      if (coord && typeof coord.flush === "function") {
+        return Promise.resolve(coord.flush()).catch(contain);
+      }
+    } catch (err) {
+      contain(err);
     }
     try {
-      if (backend && typeof backend.flush === "function") return Promise.resolve(backend.flush());
-    } catch {
-      /* nothing flushable mounted */
+      if (backend && typeof backend.flush === "function") {
+        return Promise.resolve(backend.flush()).catch(contain);
+      }
+    } catch (err) {
+      contain(err);
     }
     return Promise.resolve();
   }
@@ -993,19 +1142,22 @@ async function run(ctx) {
           );
           return;
         case "stop":
-          // Abort the in-flight turn. The agent converges to idle; `whenIdle`
-          // resolves, `pending` drains, and a `turn_end` (reason: canceled) follows.
+          // Abort one session's in-flight turn (default: the one on screen).
+          // Only THAT session stops; everything else in the pool keeps running.
           track(
             Promise.resolve().then(() => {
-              if (pending > 0 && handle?.agent) handle.agent.cancel({ kind: "user" });
+              const id = String(msg.id ?? activeId);
+              const h = id === "" ? null : handles.get(id);
+              if (h?.agent) h.agent.cancel({ kind: "user" });
             }).catch((err) =>
               emit({ t: "error", message: `stop failed: ${String(err?.message ?? err)}` }),
             ),
           );
           return;
         case "new_chat":
-          // Reset to a fresh, session-less state: dispose the live agent without
-          // minting a new session record (created lazily on the next prompt).
+          // Detach to a blank New Session. Nothing is cancelled and no agent
+          // is disposed: sessions with a turn in flight keep streaming in the
+          // background and stay reachable from the history list.
           track(
             resetToNewChat().catch((err) =>
               emit({ t: "error", message: `new_chat failed: ${String(err?.message ?? err)}` }),
@@ -1071,24 +1223,30 @@ async function run(ctx) {
 
     pending += 1;
     (async () => {
-      // Lazy session creation: a session-less bridge mints its first session
-      // only when a real prompt is sent, so "new chat"/sidebar opens never
-      // register empty conversations in the shared session store.
-      if (!handle) await startFresh();
-      // Access mode as real, enforced policy events on the active session (the
-      // same mechanism dsh web's /permission presets use, no prompt prefixing).
-      setSandboxMode(handle.agent.session, msg.mode === "readonly" ? "read-only" : "workspace-write");
-      setApprovalPolicy(handle.agent.session, "ask");
-      handle.agent.followup(
-        createUserMessage({
-          content: [{ type: "text", text }],
-          source: { kind: "user" },
-        }),
-      );
-      await handle.agent.whenIdle();
+      // Lazy session creation / re-resume of an evicted session. A session is
+      // minted only on the first real prompt, so "new chat"/sidebar opens
+      // never register empty conversations in the shared session store.
+      const h = await ensureActive();
+      const sid = activeId;
+      markTurnStart(sid);
+      try {
+        // Access mode as real, enforced policy events on the active session
+        // (the same mechanism dsh web's /permission presets use, no prefixing).
+        setSandboxMode(h.agent.session, msg.mode === "readonly" ? "read-only" : "workspace-write");
+        setApprovalPolicy(h.agent.session, "ask");
+        h.agent.followup(
+          createUserMessage({
+            content: [{ type: "text", text }],
+            source: { kind: "user" },
+          }),
+        );
+        await h.agent.whenIdle();
+      } finally {
+        markTurnEnd(sid);
+      }
     })()
       .catch((err) => {
-        emit({ t: "error", message: String(err?.message ?? err), stack: String(err?.stack ?? "") });
+        emit({ t: "error", session: activeId, message: String(err?.message ?? err), stack: String(err?.stack ?? "") });
       })
       .finally(() => {
         pending -= 1;

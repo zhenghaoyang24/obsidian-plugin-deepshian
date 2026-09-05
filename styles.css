@@ -195,6 +195,42 @@
   background: var(--dshc-yellow);
   animation: dshc-pulse 1.2s ease-in-out infinite;
 }
+/* "Task running" marker: a green pulsing dot ahead of the session title. The
+ * row keeps its normal layout; the dot only appears while the bridge reports
+ * a live turn for that session. */
+.dshc-history-row.running {
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+}
+.dshc-history-row.running .dshc-history-text {
+  flex: 1;
+  min-width: 0;
+}
+.dshc-history-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dshc-green);
+  animation: dshc-running-dot 1.1s ease-in-out infinite;
+}
+@keyframes dshc-running-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.72);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dshc-history-dot {
+    animation: none;
+  }
+}
 .dshc-history-name {
   font-size: 13px;
   line-height: 19px;
@@ -309,6 +345,19 @@
   line-height: 20px;
   color: var(--dshc-label-primary);
   cursor: default;
+}
+/* "N 个任务进行中" hint right of the session title: secondary text, small,
+ * never wraps or shrinks — the title gives way via its own ellipsis. */
+.dsh-running-hint {
+  flex: none;
+  white-space: nowrap;
+  font-size: var(--font-ui-smallest, 11px);
+  line-height: 16px;
+  color: var(--dshc-label-tertiary);
+  cursor: default;
+}
+.dsh-running-hint[hidden] {
+  display: none;
 }
 
 /* Explicit "New chat" pill — labeled so the action is impossible to miss. */

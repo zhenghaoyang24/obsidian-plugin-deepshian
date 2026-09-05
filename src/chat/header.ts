@@ -9,8 +9,6 @@ import type { BridgeStatus, SessionSummary } from "../bridge/types";
 export interface ChatHeaderCallbacks {
   onNewChat(): void;
   onOpenSession(id: string): void;
-  /** Whether a turn is streaming — archives of the live session are disabled then. */
-  isBusy(): boolean;
 }
 
 /**
@@ -21,6 +19,9 @@ export class ChatHeader {
   private headerEl!: HTMLElement;
   private statusChip!: HTMLElement;
   private titleEl!: HTMLElement;
+  /** Pool-wide "N tasks running" hint right of the title (hidden at 0). */
+  private runningHintEl!: HTMLElement;
+  private runningCount = 0;
   private historyBtn!: HTMLButtonElement;
   private historyPanelEl!: HTMLElement;
   private historyTitleEl!: HTMLElement;
@@ -44,6 +45,12 @@ export class ChatHeader {
     this.titleEl = this.headerEl.createSpan({
       cls: "dsh-title",
       text: tt("新对话", "New chat"),
+    });
+    // Small secondary text right of the session title: how many sessions in
+    // the bridge's pool have a turn in flight. Hidden while the count is 0.
+    this.runningHintEl = this.headerEl.createSpan({
+      cls: "dsh-running-hint",
+      attr: { hidden: "" },
     });
 
     // Session-history dropdown; lives inside .dsh-header (position:relative)
@@ -110,6 +117,26 @@ export class ChatHeader {
     this.historyBtn.disabled = !alive;
   }
 
+  /**
+   * Reflect how many sessions across the agent pool are streaming right now.
+   * The count is pool-wide (the session on screen included); zero hides the
+   * hint entirely so the header stays clean when nothing runs.
+   */
+  renderRunningCount(count: number): void {
+    this.runningCount = count;
+    if (count <= 0) {
+      this.runningHintEl.setAttribute("hidden", "");
+      return;
+    }
+    this.runningHintEl.setText(
+      tt(
+        `${count} 个任务进行中`,
+        count === 1 ? "1 task running" : `${count} tasks running`,
+      ),
+    );
+    this.runningHintEl.removeAttribute("hidden");
+  }
+
   /** Paint the cached session rows (newest first, active one marked). */
   renderSessions(activeId: string): void {
     this.activeId = activeId;
@@ -128,10 +155,19 @@ export class ChatHeader {
         attr: { type: "button", "data-session": s.id },
       });
       row.toggleClass("active", s.id === this.activeId);
+      row.toggleClass("running", s.running === true);
+      // Pulsing marker for a session whose task is still streaming somewhere
+      // in the bridge's agent pool — the affordance that says "click me to go
+      // back to the live output".
+      if (s.running === true) {
+        row.createSpan({ cls: "dshc-history-dot", attr: { "aria-hidden": "true" } });
+      }
       const textCol = row.createDiv({ cls: "dshc-history-text" });
       textCol.createDiv({ cls: "dshc-history-name", text: s.title || tt("未命名会话", "Untitled session") });
       const metaParts: string[] = [];
-      if (s.live) metaParts.push(tt("进行中", "live"));
+      if (s.running === true) {
+        metaParts.push(tt("任务进行中…", "task running…"));
+      }
       if (s.updatedAt != null && Number(s.updatedAt) > 0) {
         metaParts.push(formatTime(Number(s.updatedAt)));
       }
@@ -161,9 +197,17 @@ export class ChatHeader {
         },
       });
       archive.append(svgIcon(ICON_ARCHIVE));
-      // Never archive the live session mid-turn: the bridge would reject the
-      // switch anyway; disabling the affordance is the honest state.
-      archive.disabled = s.id === this.activeId && this.callbacks.isBusy();
+      // Archiving a session whose task is still running stops that task (the
+      // bridge cancels it before hiding the session) — say so on the button.
+      if (s.running === true) {
+        archive.setAttribute(
+          "title",
+          tt(
+            "归档会话（将停止其进行中的任务）",
+            "Archive session (stops its running task)",
+          ),
+        );
+      }
       archive.addEventListener("click", (evt) => {
         evt.stopPropagation();
         this.archiveSession(s, entry);
@@ -199,6 +243,7 @@ export class ChatHeader {
     this.historyBtn.setAttribute("aria-label", tt("历史会话", "Session history"));
     this.newChatBtn.setAttribute("aria-label", tt("新会话", "New session"));
     this.newChatLabelEl.setText(tt("新会话", "New session"));
+    this.renderRunningCount(this.runningCount);
     this.historyTitleEl.setText(tt("历史会话", "Session history"));
     this.historyFootEl.setText(
       tt(

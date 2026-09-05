@@ -19,8 +19,11 @@ import type { BridgeStatus, ChatMode, CommandInfo, ModelInfo, ModelSelection, Sk
 export interface ChatComposerCallbacks {
   onSend(text: string, mode: ChatMode): void;
   onStopRequest(): void;
-  /** Whether an assistant turn is streaming — the send button acts as Stop. */
-  isStreaming(): boolean;
+  /**
+   * Whether the session on screen is mid-turn — then the send button acts as
+   * Stop. Background sessions running elsewhere do not count (agent pool).
+   */
+  isActiveBusy(): boolean;
   /** Input changed (textarea resized already); lets the view re-evaluate send state. */
   onInputChanged(): void;
 }
@@ -239,8 +242,9 @@ export class ChatComposer {
     this.sendBtn.createSpan({ cls: "dshc-send-icon" }).append(svgIcon(ICON_SEND));
     this.sendBtn.createSpan({ cls: "dshc-stop-icon" }).append(svgIcon(ICON_STOP));
     this.sendBtn.addEventListener("click", () => {
-      const running = this.plugin.bridgeStatus() === "running" || this.callbacks.isStreaming();
-      if (running) {
+      // The button is Stop only while the conversation on screen is producing;
+      // a background session running in the pool must not hijack it.
+      if (this.callbacks.isActiveBusy()) {
         this.callbacks.onStopRequest();
       } else {
         this.sendCurrentInput();
