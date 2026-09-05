@@ -15,12 +15,18 @@
 //     {"cmd":"list_commands"}               the `/` picker's command registry (same service dsh web)
 //     {"cmd":"execute_command","line":"/goal ..."}   run a slash command locally, no model round-trip
 //     {"cmd":"list_skills"}                 the `/` picker's skill catalog (same provider dsh web)
+//     {"cmd":"approval_decision","id":"<id>","outcome":"allowed-once"|"rejected"}
+//                                           answer a pending approval_request (web-parity dialog)
 //
-//   outbound (dsh ↔plugin), one JSON object per line:
+//   outbound (dsh ↔ plugin), one JSON object per line:
 //     {"t":"ready","model":"...","cwd":"..."}   (boots WITHOUT a session)
 //     {"t":"models","current":{"provider","model"},"models":[{provider,id,name}]}
 //     {"t":"sessions","sessions":[{id,title,updatedAt,live,running}],"archived":"<id>"}
 //         (deleted + archived excluded; `archived` echoes the id an archive_session answered)
+//     {"t":"approval_request","session","id","toolName","callId"?,"reason"?}
+//         a tool wants to escape the sandbox; the turn parks until approval_decision
+//         (or the turn's cancellation) settles it — with no answerer every ask fails
+//         closed as "unavailable" and the denial is invisible to the user
 //     {"t":"session_status","id","running","live"}  pushed the instant a turn starts or settles
 //     {"t":"session_opened","id":"...","model":"...","running":bool,"turns":[{user,assistant,tools:[...]}]}
 //     {"t":"session_created","id":"...","model":"..."}   lazy mint on the first prompt
@@ -36,7 +42,7 @@
 //
 // Sessions persist through the shared `$DSH_HOME/sessions` JSONL backend, keyed
 // by project directory, so every conversation driven here is the SAME durable
-// record dsh web lists for this workspace ↔open either surface against the
+// record dsh web lists for this workspace ↔ open either surface against the
 // same vault and you see one shared history. Etiquette: treat a session as
 // single-writer; switch ownership here before continuing it in dsh web.
 //
@@ -522,6 +528,49 @@ async function run(ctx) {
         stack: String(err?.stack ?? ""),
       });
     }
+  });
+
+  // ---------------------------------------------------------- approvals
+  /**
+   * The sidebar's approval answerer — the CLI-profile twin of dsh web's
+   * api-proxy listener. dsh-base mounts the `approval` service with policy
+   * "ask", so a tool that wants to escape the sandbox calls approval/request;
+   * with no answerer the waterfall defaults to "unavailable" and the denial
+   * is invisible (the tool just fails). We surface pool-session asks to the
+   * sidebar and park until `approval_decision` (or the turn's cancellation)
+   * settles them. Non-pool agents (subagents) fall through via `next()` and
+   * keep the fail-closed default.
+   */
+  const pendingApprovals = new Map(); // decisionId -> settle(outcome)
+  let approvalSeq = 0;
+
+  ctx.on("approval/request", (req, next) => {
+    if (req.signal?.aborted === true) return Promise.resolve("cancelled");
+    const sessionId = String(req.agent?.session?.id ?? req.agent?.id ?? "");
+    if (sessionId === "" || !handles.has(sessionId)) return next();
+    const id = `appr-${++approvalSeq}`;
+    return new Promise((resolve) => {
+      const settle = (outcome) => {
+        if (!pendingApprovals.delete(id)) return;
+        req.signal?.removeEventListener("abort", onAbort);
+        resolve(outcome);
+      };
+      const onAbort = () => settle("cancelled");
+      pendingApprovals.set(id, settle);
+      req.signal?.addEventListener("abort", onAbort, { once: true });
+      emit({
+        t: "approval_request",
+        session: sessionId,
+        id,
+        toolName: String(req.toolName ?? ""),
+        ...(req.callId !== undefined && req.callId !== null
+          ? { callId: String(req.callId) }
+          : {}),
+        ...(req.reason !== undefined && req.reason !== null
+          ? { reason: String(req.reason) }
+          : {}),
+      });
+    });
   });
 
   async function startFresh() {
@@ -1208,6 +1257,32 @@ async function run(ctx) {
             executeCommandRaw(line).catch((err) =>
               emit({ t: "error", message: `execute_command failed: ${String(err?.message ?? err)}` }),
             ),
+          );
+          return;
+        }
+        case "approval_decision": {
+          // Settle one parked approval. Only the two grant/deny outcomes are
+          // accepted; anything else (cancellation) is the bridge's own job via
+          // the turn's abort signal.
+          const id = String(msg.id ?? "");
+          const outcome = msg.outcome === "allowed-once" ? "allowed-once" : "rejected";
+          const settle = pendingApprovals.get(id);
+          if (!settle) {
+            emit({
+              t: "error",
+              message: `approval_decision: no pending approval "${id}"`,
+            });
+            return;
+          }
+          track(
+            Promise.resolve()
+              .then(() => settle(outcome))
+              .catch((err) =>
+                emit({
+                  t: "error",
+                  message: `approval_decision failed: ${String(err?.message ?? err)}`,
+                }),
+              ),
           );
           return;
         }

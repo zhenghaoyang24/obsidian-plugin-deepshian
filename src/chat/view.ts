@@ -38,6 +38,15 @@ export class DshChatView extends ItemView {
   private activeSessionId = "";
   /** Sessions with a turn in flight right now (badge + per-session gating). */
   private runningIds = new Set<string>();
+  /**
+   * Parked sandbox-escalation asks by decision id. Approvals for the session
+   * on screen render immediately; background ones wait here and surface when
+   * the user switches to that conversation.
+   */
+  private pendingApprovals = new Map<
+    string,
+    { session: string; toolName: string; reason?: string }
+  >();
   /** Current session title, resolved by id against the latest sessions payload. */
   private currentSessionTitle = "";
   private sessionsRefreshTimer: number | null = null;
@@ -224,6 +233,12 @@ export class DshChatView extends ItemView {
         this.runningIds = new Set(
           event.sessions.filter((s) => s.running === true).map((s) => s.id),
         );
+        // Drop parked approvals whose session is gone (deleted/archived):
+        // their abort path already settled them bridge-side.
+        const listed = new Set(event.sessions.map((s) => s.id));
+        for (const [id, req] of this.pendingApprovals) {
+          if (!listed.has(req.session)) this.pendingApprovals.delete(id);
+        }
         this.header.setSessions(event.sessions);
         this.refreshCurrentTitle();
         this.header.renderSessions(this.activeSessionId);
@@ -270,6 +285,16 @@ export class DshChatView extends ItemView {
         } else {
           this.runningIds.delete(event.id);
         }
+        // Re-surface any approval that parked while this session was in the
+        // background — its card must be clickable right now, not after the
+        // next event happens to arrive.
+        for (const [id, req] of this.pendingApprovals) {
+          if (req.session !== event.id) continue;
+          this.conversation.pushApproval(
+            { id, toolName: req.toolName, reason: req.reason },
+            (outcome) => this.decideApproval(req.session, id, outcome),
+          );
+        }
         this.renderStatus();
         if (!opened) {
           new Notice(
@@ -307,9 +332,59 @@ export class DshChatView extends ItemView {
         this.conversation.scrollBottom();
         break;
       }
+      case "approval_request": {
+        // A tool wants to escape the sandbox (dsh web parity: its dialog).
+        // Render now for the conversation on screen; park background asks
+        // until that session is opened (its badge is already pulsing).
+        this.pendingApprovals.set(event.id, {
+          session: event.session,
+          toolName: event.toolName,
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        });
+        if (event.session === this.activeSessionId) {
+          this.conversation.pushApproval(
+            { id: event.id, toolName: event.toolName, reason: event.reason },
+            (outcome) => this.decideApproval(event.session, event.id, outcome),
+          );
+        } else {
+          const title =
+            this.sessionsCache.find((s) => s.id === event.session)?.title ?? event.session;
+          new Notice(
+            tt(
+              `会话「${title}」请求审批：${event.toolName}`,
+              `Approval requested in "${title}": ${event.toolName}`,
+            ),
+          );
+        }
+        break;
+      }
       default:
         break;
     }
+  }
+
+  /**
+   * Hand one decision to the bridge. Returns false when the line could not be
+   * written (bridge gone) so the card reopens instead of falsely settling.
+   */
+  private decideApproval(
+    session: string,
+    id: string,
+    outcome: "allowed-once" | "rejected",
+  ): boolean {
+    const ok = this.plugin.sendCommand({
+      cmd: "approval_decision",
+      session,
+      id,
+      outcome,
+    });
+    if (!ok) {
+      new Notice(tt("DSH 桥接未运行", "DSH bridge not running"));
+      return false;
+    }
+    this.pendingApprovals.delete(id);
+    this.conversation.settleApproval(id, outcome);
+    return true;
   }
 
   sendCurrentInput(text: string, mode: ChatMode): void {

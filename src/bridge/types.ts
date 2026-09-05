@@ -144,6 +144,21 @@ export interface SessionCreatedEvent {
   model: string;
 }
 
+/**
+ * One sandbox-escalation ask surfaced to the sidebar — the plugin-side twin
+ * of dsh web's approval dialog. The turn stays open until the user decides
+ * (or the turn is cancelled); echo the id back via `approval_decision`.
+ */
+export interface ApprovalRequestEvent {
+  t: "approval_request";
+  session: string;
+  /** Decision id — echo it back through the approval_decision command. */
+  id: string;
+  toolName: string;
+  callId?: string;
+  reason?: string;
+}
+
 // -------------------------------------------------------- slash commands
 /** One row of the `/` picker's command section (dsh `commands` registry). */
 export interface CommandInputDescriptor {
@@ -207,6 +222,7 @@ export type DshEvent =
   | CommandsEvent
   | SkillsEvent
   | SessionStatusEvent
+  | ApprovalRequestEvent
   | CommandResultEvent;
 
 export type BridgeStatus = "stopped" | "connecting" | "ready" | "running";

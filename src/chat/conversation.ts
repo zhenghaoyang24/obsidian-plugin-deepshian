@@ -14,15 +14,29 @@ import type { ReplayTurn } from "../bridge/types";
 
 /**
  * Owns the conversation column: assistant/user bubbles, streaming markdown,
- * the Think disclosure, tool cards, token usage, the per-turn clock, and the
- * copy actions. All DOM lives under `.dshc-scroll` / `.dshc-column`.
+ * the Think disclosure, tool cards, token usage, the per-turn clock, the
+ * approval (sandbox-escalation) cards, and the copy actions. All DOM lives
+ * under `.dshc-scroll` / `.dshc-column`.
  */
+interface ApprovalCard {
+  id: string;
+  detailsEl: HTMLDetailsElement;
+  allowBtn: HTMLButtonElement | null;
+  denyBtn: HTMLButtonElement | null;
+  /** Set on first click so a double-fire cannot answer twice. */
+  settled: boolean;
+}
+
+export type ApprovalOutcome = "allowed-once" | "rejected";
+
 export class ChatConversation {
   private entries: Entry[] = [];
   private currentAssistant: AssistantEntry | null = null;
   private renderTimer: number | null = null;
   private clockTimer: number | null = null;
   private turnStartedAt = 0;
+  /** Open approval cards keyed by decision id (see pushApproval). */
+  private approvals = new Map<string, ApprovalCard>();
 
   private messagesEl!: HTMLElement;
   private columnEl!: HTMLElement;
@@ -51,6 +65,7 @@ export class ChatConversation {
     this.renderTimer = null;
     this.entries = [];
     this.currentAssistant = null;
+    this.approvals.clear();
     this.stopClock();
     this.columnEl.empty();
   }
@@ -201,6 +216,9 @@ export class ChatConversation {
       this.renderError(cur);
       this.finishAssistant(cur);
     }
+    // An approval still parked at turn-end can never be answered anymore
+    // (the turn closed around it — typically a cancellation mid-ask).
+    this.settleAllApprovals(tt("已取消", "cancelled"));
     this.currentAssistant = null;
   }
 
@@ -222,6 +240,7 @@ export class ChatConversation {
     cur.error ??= tt("回合被中断（dsh 已停止）", "turn interrupted (dsh stopped)");
     this.renderError(cur);
     this.finishAssistant(cur);
+    this.settleAllApprovals(tt("回合被中断", "turn interrupted"));
     this.currentAssistant = null;
   }
 
@@ -229,6 +248,7 @@ export class ChatConversation {
   renderReplay(turns: ReplayTurn[]): void {
     this.columnEl.empty();
     this.entries = [];
+    this.approvals.clear();
     for (const turn of turns) {
       if (turn.user && turn.user.trim() !== "") {
         this.appendUserBubble({ kind: "user", text: turn.user });
@@ -319,6 +339,110 @@ export class ChatConversation {
       pre.textContent = text;
     }
     this.scrollBottom();
+  }
+
+  // ------------------------------------------------------------- approvals
+  /**
+   * One sandbox-escalation ask, rendered as a disclosure card in the tool-card
+   * family with 允许一次 / 拒绝 actions. The card parks (yellow pulsing dot,
+   * "等待审批") until the user picks or `settleApproval`/`settleAllApprovals`
+   * finalizes it from a turn/bridge event. Clicking only reports the choice —
+   * the view owns sending the decision and calls back with settle/reopen.
+   */
+  pushApproval(
+    req: { id: string; toolName: string; reason?: string },
+    onDecide: (outcome: ApprovalOutcome) => boolean,
+  ): void {
+    if (this.approvals.has(req.id)) return;
+    const cur = this.currentAssistant ?? this.pushAssistant();
+    const details = this.buildToolCard(cur.toolsEl ?? this.columnEl, req.toolName, {});
+    details.setAttribute("data-state", "approval");
+    details.querySelector<HTMLElement>(".dshc-sum")?.setText(tt("等待审批…", "awaiting approval"));
+    const body = details.querySelector<HTMLElement>(".dshc-toolbody");
+    if (body && req.reason && req.reason.trim() !== "") {
+      body.createDiv({ cls: "dshc-approval-reason", text: req.reason });
+    }
+    let allowBtn: HTMLButtonElement | null = null;
+    let denyBtn: HTMLButtonElement | null = null;
+    if (body) {
+      const row = body.createDiv({ cls: "dshc-approval-actions" });
+      allowBtn = row.createEl("button", {
+        cls: "dshc-approval-btn mod-cta",
+        text: tt("允许一次", "Allow once"),
+        attr: { type: "button" },
+      });
+      denyBtn = row.createEl("button", {
+        cls: "dshc-approval-btn",
+        text: tt("拒绝", "Deny"),
+        attr: { type: "button" },
+      });
+    }
+    const card: ApprovalCard = {
+      id: req.id,
+      detailsEl: details,
+      allowBtn,
+      denyBtn,
+      settled: false,
+    };
+    this.approvals.set(req.id, card);
+    const decide = (outcome: ApprovalOutcome): void => {
+      if (card.settled) return;
+      // Optimistically lock the buttons; the view reopens the card when the
+      // decision could not be handed to the bridge.
+      card.settled = true;
+      allowBtn?.setAttribute("disabled", "true");
+      denyBtn?.setAttribute("disabled", "true");
+      if (!onDecide(outcome)) {
+        card.settled = false;
+        allowBtn?.removeAttribute("disabled");
+        denyBtn?.removeAttribute("disabled");
+        return;
+      }
+      this.scrollBottom();
+    };
+    allowBtn?.addEventListener("click", () => decide("allowed-once"));
+    denyBtn?.addEventListener("click", () => decide("rejected"));
+    this.scrollBottom();
+  }
+
+  /** Finalize one card after the bridge accepted the decision. */
+  settleApproval(id: string, outcome: ApprovalOutcome): void {
+    const card = this.approvals.get(id);
+    if (!card) return;
+    this.approvals.delete(id);
+    this.stampApproval(card, outcome === "allowed-once" ? "ok" : "error",
+      outcome === "allowed-once" ? tt("已允许一次", "allowed once") : tt("已拒绝", "denied"));
+  }
+
+  /** Send failed — put the card back into its clickable waiting state. */
+  reopenApproval(id: string): void {
+    const card = this.approvals.get(id);
+    if (!card) return;
+    card.settled = false;
+    card.allowBtn?.removeAttribute("disabled");
+    card.denyBtn?.removeAttribute("disabled");
+    card.detailsEl.setAttribute("data-state", "approval");
+    card.detailsEl.querySelector<HTMLElement>(".dshc-sum")?.setText(tt("等待审批…", "awaiting approval"));
+  }
+
+  /** Turn ended / bridge died with asks still open: they can never be answered. */
+  settleAllApprovals(note: string): void {
+    for (const card of this.approvals.values()) {
+      this.stampApproval(card, "error", note);
+    }
+    this.approvals.clear();
+  }
+
+  private stampApproval(
+    card: ApprovalCard,
+    state: "ok" | "error",
+    label: string,
+  ): void {
+    card.settled = true;
+    card.allowBtn?.setAttribute("disabled", "true");
+    card.denyBtn?.setAttribute("disabled", "true");
+    card.detailsEl.setAttribute("data-state", state);
+    card.detailsEl.querySelector<HTMLElement>(".dshc-sum")?.setText(label);
   }
 
   // ------------------------------------------------------------- rendering

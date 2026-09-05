@@ -18,6 +18,7 @@ Obsidian 插件（id `deepshian`）：把本机 DeepSeek Harness（`dsh` CLI）�
 - `session/event` 由 dsh-session 以 session 作用域发射，第一个参数带 `session`；根 ctx 一个监听器可观察所有会话 —— bridge 里 `if (session?.id !== activeSessionId) return` 是我们自己加的单例过滤。
 - `sessionQuery.listSessions()` 行自带 `live`（= 本进程内有存活 session 对象），是"谁在跑"的现成底料。
 - `agent/status` **不会**被转发给 web 客户端，说明"运行中"状态是 UI 侧聚合出来的，不是原生服务。
+- 审批：dsh-base 挂载 `approval` 服务（策略默认 ask）。bridge 现已注册根级 `approval/request` answerer（签名 `(req, next)`，模仿 dsh-host-apiproxy）：池内会话的提权请求 → `approval_request` 事件 → UI 审批卡 → `approval_decision` 命令回传；abort（取消/停止/归档）自动 settle 为 `cancelled`；非池 agent（subagent）走 `next()` 保持 fail-closed。`unavailable` 的语义是 fail closed，绝不能让池内会话的审批落回默认分支。
 - 审批：`setApprovalPolicy(session, "ask")` 在没有 answerer 的 CLI 进程里**fail closed**（waterfall 默认返回 `unavailable`，只有 `allowed-once` 才放行）。要暴露审批需注册作用域 `scopeTarget(agent, agent)` 的 `approval/request` waterfall answerer。
 
 ## 约定与坑（务必遵守）

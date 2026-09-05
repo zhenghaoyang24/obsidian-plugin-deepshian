@@ -605,6 +605,39 @@
   color: var(--dshc-red);
   animation: none;
 }
+/* Sandbox-escalation approval card: parked state keeps the pulsing yellow dot
+ * (inherited from .dshc-tool running pulse); actions sit in the card body. */
+.dshc-approval-reason {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dshc-label-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 6px 0 2px;
+}
+.dshc-approval-actions {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+.dshc-approval-btn {
+  padding: 3px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--dshc-border-l1);
+  background: var(--dshc-interactive-hover);
+  color: var(--dshc-label-primary);
+  font-size: 12px;
+  line-height: 20px;
+  cursor: pointer;
+  box-shadow: none;
+}
+.dshc-approval-btn:hover:not([disabled]) {
+  background: var(--dshc-interactive-active);
+}
+.dshc-approval-btn[disabled] {
+  opacity: 0.55;
+  cursor: default;
+}
 @keyframes dshc-pulse {
   50% {
     opacity: 0.35;
