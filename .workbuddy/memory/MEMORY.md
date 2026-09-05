@@ -33,7 +33,7 @@ Obsidian 插件（id `deepshian`）：把本机 DeepSeek Harness（`dsh` CLI）�
 - `durableFlush()` 必须吞掉 rejection：dsh 的 PersistenceCoordinator 在未初始化（无会话）时 flush 会 reject，直接炸进程。
 - bridge 事件 tap 按 `handles.has(sid)` 过滤——**必须保留**，否则子 agent（subagent 有自己的 session id）的事件会漏进协议。
 - 归档会话 = 停掉它的 turn + dispose agent（隐藏的会话不能继续烧 token）；`agent.cancel()` 默认清空 inbox，要保留传 `{keepInbox:true}`。
-- 当前版本 1.2.0；`minAppVersion 1.5.7` → 不能用 `revealLeaf()`（需 1.7.2），用 `setActiveLeaf()`。
+- 当前版本 1.3.0；`minAppVersion 1.5.7` → 不能用 `revealLeaf()`（需 1.7.2），用 `setActiveLeaf()`。
 
 ## 质量门禁
 
