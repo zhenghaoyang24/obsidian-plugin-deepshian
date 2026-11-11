@@ -312,8 +312,7 @@ export class ChatComposer {
     this.currentSelection = current;
     if (!this.currentSelection) return;
     const { provider, model } = this.currentSelection;
-    const exact = this.modelsCache.find((m) => m.provider === provider && m.id === model);
-    this.modelBtnLabel.setText(exact?.name ?? model);
+    this.renderModelFallback();
 
     this.modelMenuEl.empty();
     if (this.modelsCache.length === 0) {
@@ -334,6 +333,8 @@ export class ChatComposer {
           role: "option",
           "data-provider": m.provider,
           "data-model": m.id,
+          title: `${m.name}\n${m.provider}/${m.id}`,
+          "aria-label": `${m.name} (${m.provider})`,
         },
       });
       const textCol = item.createDiv({ cls: "dshc-model-text" });
@@ -353,7 +354,8 @@ export class ChatComposer {
             model: m.id,
           });
           // optimistic until the authoritative ModelsEvent round-trips
-          this.modelBtnLabel.setText(m.name);
+          this.currentSelection = { provider: m.provider, model: m.id };
+          this.renderModelFallback();
         }
         this.closeModelMenu();
       });
@@ -366,11 +368,18 @@ export class ChatComposer {
     this.renderModelFallback();
   }
 
-  /** Fallback pill label before the first ModelsEvent arrives. */
+  /** Preserve the selected model's full id until its catalog name is available. */
   renderModelFallback(): void {
     const raw = this.plugin.bridge.model;
-    const model = raw.includes("/") ? (raw.split("/")[1] ?? raw) : raw || "…";
-    this.modelBtnLabel.setText(model);
+    const selection = this.currentSelection ?? parseModelString(raw);
+    const model = selection?.model ?? (raw || "…");
+    const exact = selection
+      ? this.modelsCache.find((m) => m.provider === selection.provider && m.id === selection.model)
+      : undefined;
+    const label = exact?.name ?? model;
+    this.modelBtnLabel.setText(label);
+    this.modelBtn.setAttribute("title", selection ? `${label}\n${selection.provider}/${selection.model}` : label);
+    this.modelBtn.setAttribute("aria-label", selection ? `${label} (${selection.provider})` : label);
   }
 
   /** Close the mode/model menus when a pointerdown lands outside them. */

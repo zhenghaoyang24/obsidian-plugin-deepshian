@@ -17,6 +17,7 @@ English · [简体中文](README.zh.md)
 | Receiving both streamed text and the completed answer can produce duplicates. | Append only the missing suffix of the completed answer. |
 | An existing session opens with a title but no conversation. | Read current Session snapshots, with a fallback for older event arrays. |
 | The Think disclosure and its preview distract from the answer. | Hide them by default; enable **Show thinking** whenever wanted. |
+| Long model names are cut off, or a namespaced id displays only as `deepseek`. | Wrap the full name in the menu and trigger, preserve the complete id, and show provider/id details on hover. |
 
 The missing-output symptom is also reported in [upstream issue #1](https://github.com/zhenghaoyang24/obsidian-plugin-deepshian/issues/1).
 
@@ -150,7 +151,7 @@ npm run build
 npm run dev
 ```
 
-The patch was checked with **30 passing tests**, plus lint, TypeScript checks, and a production build. Compatibility tests execute the shipped bridge module with synthetic events and inert SDK imports; they do not call a model or read a real vault. They cover completed-message recovery, reasoning exclusion, stream deduplication, missing suffixes, concurrent sessions, current live-frame routing, and history replay.
+The patch was checked with **33 passing tests**, plus lint, TypeScript checks, and a production build. Compatibility tests execute the shipped bridge module with synthetic events and inert SDK imports; they do not call a model or read a real vault. They cover completed-message recovery, reasoning exclusion, stream deduplication, missing suffixes, concurrent sessions, current live-frame routing, and history replay.
 
 The underlying bridge fixes were also exercised in Obsidian 1.15.0 on Windows with Harness 0.2.2-rc.1: a test reply rendered and a saved conversation displayed its answer. Other platforms and Harness versions have not been manually validated in this work.
 
