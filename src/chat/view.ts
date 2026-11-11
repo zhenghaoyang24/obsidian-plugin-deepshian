@@ -73,9 +73,14 @@ export class DshChatView extends ItemView {
     return "bot";
   }
 
+  updateReasoningVisibility(): void {
+    this.contentEl.toggleClass("dshc-hide-reasoning", !this.plugin.settings.showReasoning);
+  }
+
   async onOpen(): Promise<void> {
     this.contentEl.empty();
     this.contentEl.addClass("dsh-chat");
+    this.updateReasoningVisibility();
 
     this.header = new ChatHeader(this.contentEl, this.plugin, {
       onNewChat: () => this.startNewChat(),

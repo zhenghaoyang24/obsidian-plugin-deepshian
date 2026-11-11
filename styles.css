@@ -509,6 +509,9 @@
 /* -------------------------------------------- disclosure rows (Think/tools)
  * Structure per dsh DisclosureRow/ReasoningRow/GenericCommandCard:
  * [leading icon ⇄ chevron] title · dot · summary; body below when open. */
+.dsh-chat.dshc-hide-reasoning .dshc-reasoning {
+  display: none !important;
+}
 .dshc-disc {
   font-size: var(--font-ui-small);
 }

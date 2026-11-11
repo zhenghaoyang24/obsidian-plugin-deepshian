@@ -93,7 +93,7 @@ function emit(obj) {
 
 function textOf(content) {
   if (!Array.isArray(content)) return "";
-  return content.map((b) => (typeof b.text === "string" ? b.text : "")).join("");
+  return content.filter((b) => b?.type === "text").map((b) => (typeof b.text === "string" ? b.text : "")).join("");
 }
 
 function parseArguments(raw) {
@@ -247,19 +247,38 @@ async function adoptVaultWorkspace(doc, vaultCanon, rows, resolve, nowIso) {
  * emitting session, stamped on every event so a sidebar watching another
  * conversation can tell whose turn a line belongs to.
  */
+// Compatibility with Harness 0.2: live chunks use agent/assistant-stream.
+// Keep completed-message fallback per assistant step to avoid duplicate text.
+const streamedTextBySession = new Map();
 function mapEvent(event, sid) {
   const d = event.data;
   const at = sid ? { session: sid } : {};
   switch (event.type) {
+    case "step/start":
+      streamedTextBySession.delete(sid);
+      break;
     case "turn/start":
+      streamedTextBySession.delete(sid);
       emit({ t: "turn_start", ...at });
       break;
     case "assistant/chunk": {
       const c = d?.chunk;
       if (c == null) break;
-      if (c.type === "text-delta") emit({ t: "text", ...at, delta: c.text ?? "" });
+      if (c.type === "text-delta") {
+        const delta = c.text ?? "";
+        streamedTextBySession.set(sid, (streamedTextBySession.get(sid) ?? "") + delta);
+        emit({ t: "text", ...at, delta });
+      }
       else if (c.type === "reasoning-delta") emit({ t: "reasoning", ...at, delta: c.text ?? "" });
       else if (c.type === "usage") emit({ t: "usage", ...at, usage: c.usage });
+      break;
+    }
+    case "assistant/message": {
+      const complete = textOf(d?.message?.content);
+      const streamed = streamedTextBySession.get(sid) ?? "";
+      const missing = complete.startsWith(streamed) ? complete.slice(streamed.length) : (streamed ? "" : complete);
+      if (missing) emit({ t: "text", ...at, delta: missing });
+      streamedTextBySession.delete(sid);
       break;
     }
     case "tool/call":
@@ -289,6 +308,7 @@ function mapEvent(event, sid) {
       break;
     }
     case "turn/end":
+      streamedTextBySession.delete(sid);
       emit({
         t: "turn_end",
         ...at,
@@ -389,6 +409,20 @@ function foldHistory(events) {
     }
   }
   return turns;
+}
+
+/** Subscribe to the transient Assistant feed used by Harness 0.2+. */
+function installStreamTap(ctx, handles) {
+  return ctx.on("agent/assistant-stream", ({ agent, frame }) => {
+    const sid = String(agent?.session?.id ?? "");
+    if (!handles.has(sid) || frame?.type !== "chunk") return;
+    mapEvent({ type: "assistant/chunk", data: { chunk: frame.chunk } }, sid);
+  });
+}
+
+/** Current Session API, with a fallback for older Harness versions. */
+function sessionEvents(session) {
+  return session?.snapshotEvents?.() ?? session?.events ?? [];
 }
 
 async function run(ctx) {
@@ -529,6 +563,9 @@ async function run(ctx) {
       });
     }
   });
+
+  // Harness 0.2 publishes transient frames separately from durable events.
+  const disposeStreamTap = installStreamTap(ctx, handles);
 
   // ---------------------------------------------------------- approvals
   /**
@@ -972,7 +1009,7 @@ async function run(ctx) {
         id: wanted,
         model,
         running: isRunning(wanted),
-        turns: foldHistory(pooled.agent.session?.events ?? []),
+        turns: foldHistory(sessionEvents(pooled.agent.session)),
       });
       return;
     }
@@ -1029,7 +1066,7 @@ async function run(ctx) {
     handles.set(String(id), next);
     if (persistedEvents.length === 0) {
       try {
-        persistedEvents = next.agent.session?.events ?? [];
+        persistedEvents = sessionEvents(next.agent.session);
       } catch {}
     }
     return { handle: next, events: persistedEvents };
@@ -1129,6 +1166,7 @@ async function run(ctx) {
         .then(async () => {
           await new Promise((r) => setTimeout(r, 120));
           disposeEventTap?.();
+          disposeStreamTap?.();
           process.exit(0);
         });
       return;
@@ -1147,6 +1185,7 @@ async function run(ctx) {
         .then(async () => {
           await new Promise((r) => setTimeout(r, 120));
           disposeEventTap?.();
+          disposeStreamTap?.();
           process.exit(0);
         });
         }

@@ -14,6 +14,8 @@ export interface DshSettings {
   onOpen: "new" | "resume";
   /** Plugin UI language: "auto" follows Obsidian, otherwise forced zh/en. */
   language: LanguageSetting;
+  /** Show the separate Think disclosure and its live preview. */
+  showReasoning: boolean;
   debug: boolean;
 }
 
@@ -23,6 +25,7 @@ export const DEFAULT_SETTINGS: DshSettings = {
   readonlyByDefault: false,
   onOpen: "new",
   language: "auto",
+  showReasoning: false,
   debug: false,
 };
 
@@ -112,6 +115,19 @@ export class DshSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl).setName(t("对话", "Chat")).setHeading();
+    new Setting(containerEl)
+      .setName(t("显示思考过程", "Show thinking"))
+      .setDesc(t(
+        "显示独立的 Think 折叠区及预览。关闭只影响显示，不改变模型的思考能力。",
+        "Show the separate Think disclosure and preview. Hiding it does not change model reasoning.",
+      ))
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.showReasoning).onChange(async (v) => {
+          this.plugin.settings.showReasoning = v;
+          await this.plugin.saveSettings();
+          this.plugin.onReasoningVisibilityChanged();
+        }),
+      );
     new Setting(containerEl)
       .setName(t("默认只读启动", "Start read-only"))
       .setDesc(

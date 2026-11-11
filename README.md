@@ -66,6 +66,7 @@ The output lands in `build/` — the same three files (`main.js`, `manifest.json
 | **Bridge profile**      | `deepshian`       | Profile passed as `--profile`; auto-installed on first run                                                        |
 | **Reinstall bridge profile** | —          | Auto-installs on first run (dialog) or repairs the profile path on this machine (e.g. when dsh was installed after the plugin) |
 | **Start read-only**     | Off               | Every new sidebar starts in read-only mode                                                                        |
+| **Show thinking**       | Off               | Show the Think disclosure and preview; hiding it does not change model reasoning                                 |
 | **On open**             | Start new conversation | Whether opening the sidebar starts a new conversation or resumes the most recent one for this vault          |
 | **Debug logging**       | Off               | Log unparsed stdout lines and harness stderr to the developer console                                              |
 
