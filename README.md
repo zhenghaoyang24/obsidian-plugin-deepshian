@@ -83,6 +83,24 @@ Keep your existing `data.json`, which contains plugin settings. You do not need 
 
 You should see `PING_OK` in the conversation. **Ready** alone confirms the bridge started; receiving an answer confirms the round trip.
 
+## Use Command Code GOAT credits
+
+Command Code's [Provider API](https://commandcode.ai/docs/provider) supports GOAT accounts and meters requests against the plan's model access and credits. Use your own Command Code account and API key; installing this fork does not provide a subscription or shared credits.
+
+DeepShian uses its own DSH profile, normally `deepshian`. A provider configured in the desktop or web profile is not automatically available in this separate profile.
+
+1. Initialize DeepShian once using the steps above.
+2. Make the credential reference `COMMANDCODE_API_KEY` available through DSH's credential management. If another DSH profile already uses this shared reference, reuse it; do not put the key itself in the YAML file or this repository.
+3. Back up `$DSH_HOME/profiles/deepshian/cordis.patch.yml` (by default `~/.dsh/profiles/deepshian/cordis.patch.yml`). Merge the entries from [the example configuration](examples/commandcode-goat.patch.yml) into it. Keep the existing `deepshian-bridge` insert. If `llm-pi-ai` or `agent-default-model` already exists, merge that entry instead of adding a duplicate id; preserve other provider routes.
+4. When no task is running, disable and re-enable DeepShian. Start a new conversation and choose **DeepSeek V4.1 Flash Fast** under **commandcode** in the model menu.
+5. Send `Reply exactly GOAT_OK. Do not read files or call tools.` Confirm the answer appears.
+
+The example uses `https://api.commandcode.ai/provider/v1` with OpenAI Chat Completions. It declares two text-only model choices and defaults to `deepseek/deepseek-v4.1-flash-fast`. Use the model menu to switch between the Command Code route and `deepseek-account`; the latter uses the DeepSeek account route. Model availability and credits follow your provider account, not this plugin's display name.
+
+The route and model above were checked with a real bridge request and an Obsidian reply. The example itself was structurally checked; vision input and other Command Code models were not tested. A bridge-profile reinstall or refresh can replace manual profile edits, so keep your provider configuration backed up. Changing the YAML does not change an already running bridge's selected model until it reloads.
+
+For the DSH adapter and credential-reference format, see the [official pi-ai adapter documentation](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/llm/llm-pi-ai/README.md).
+
 ## Everyday use
 
 Start with **Read Only** when you only want to read or ask questions. For example, type `@`, select a note, then ask:

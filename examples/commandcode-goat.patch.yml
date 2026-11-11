@@ -1,0 +1,35 @@
+# Merge these entries into an initialized DeepShian profile's cordis.patch.yml.
+# Keep the existing deepshian-bridge insert. Merge an existing id instead of
+# adding a second entry with the same id. No API key belongs in this file.
+- id: llm-pi-ai
+  name: "@deepseek-ai/dsh-llm-pi-ai"
+  config:
+    providers:
+      commandcode:
+        apiKeyEnv: COMMANDCODE_API_KEY
+        api: openai-completions
+        baseURL: https://api.commandcode.ai/provider/v1
+        models:
+          - id: deepseek/deepseek-v4.1-flash
+            name: DeepSeek V4.1 Flash (Command Code)
+            contextWindow: 1000000
+            input: [text]
+            reasoningEfforts:
+              "off": null
+              low: low
+              medium: medium
+              high: high
+          - id: deepseek/deepseek-v4.1-flash-fast
+            name: DeepSeek V4.1 Flash Fast (Command Code)
+            contextWindow: 1000000
+            input: [text]
+            reasoningEfforts:
+              "off": null
+              low: low
+              medium: medium
+              high: high
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: commandcode
+    model: deepseek/deepseek-v4.1-flash-fast

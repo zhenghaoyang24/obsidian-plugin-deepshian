@@ -83,6 +83,24 @@ build/
 
 看到回答 `PING_OK` 才说明整条链路可用。仅显示“就绪 / Ready”，只代表桥接进程已启动。
 
+## 使用 Command Code GOAT 额度
+
+Command Code 的 [Provider API](https://commandcode.ai/docs/provider) 支持 GOAT 账号，按套餐内对应模型的访问权限和额度计算用量。使用者需要自己的 Command Code 账号和 API key，安装本 fork 不会附送订阅或共享额度。
+
+DeepShian 使用独立的 DSH profile，通常叫 `deepshian`。桌面版或网页版 profile 已经配置好的服务商，不会自动出现在这份独立配置中。
+
+1. 先按上文步骤初始化 DeepShian。
+2. 通过 DSH 的凭据管理功能提供 `COMMANDCODE_API_KEY` 引用。如果其他 DSH profile 已在使用这个共享引用，直接复用即可；不要把密钥本身写进 YAML 或本仓库。
+3. 备份 `$DSH_HOME/profiles/deepshian/cordis.patch.yml`，默认位置是 `~/.dsh/profiles/deepshian/cordis.patch.yml`。将[示例配置](examples/commandcode-goat.patch.yml)的条目合并进去，保留原有 `deepshian-bridge` 插入条目。若已有 `llm-pi-ai` 或 `agent-default-model`，合并现有条目，避免重复 id，并保留其他服务商配置。
+4. 等当前任务结束后，停用再启用 DeepShian。新建会话，在模型菜单的 **commandcode** 分组中选择 **DeepSeek V4.1 Flash Fast**。
+5. 发送 `请只回复 GOAT_OK，不要读取文件，不要调用工具。`，确认能看到回答。
+
+示例使用 `https://api.commandcode.ai/provider/v1` 的 OpenAI Chat Completions 接口，声明两个纯文本模型选项，默认模型为 `deepseek/deepseek-v4.1-flash-fast`。可在模型菜单中切换 Command Code 通道和 `deepseek-account`；后者对应 DeepSeek 登录账号通道。可用模型与额度以你的服务商账号为准，不能只看插件显示的模型短名称。
+
+上述通道和模型已经做过真实桥接请求及 Obsidian 回答检查。示例文件本身做了结构检查，没有测试图片输入或其他 Command Code 模型。重新安装或刷新桥接 profile 可能覆盖手动配置，请保留服务商配置备份。仅修改 YAML 不会让已运行的桥接立即切换所选模型，需要重新加载。
+
+DSH 适配器及凭据引用格式见[官方 pi-ai 适配器文档](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/llm/llm-pi-ai/README.md)。
+
 ## 日常怎么用
 
 只想阅读、提问时，先选择“仅查看”。例如输入 `@`，选中一篇笔记，再发送：
