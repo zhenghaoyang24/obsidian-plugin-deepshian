@@ -440,19 +440,6 @@ async function run(ctx) {
   const sessionQuery = ctx.get("sessionQuery");
 
   /**
-   * Live selection reference handed to installModelSelection: every system-prompt
-   * assembly re-reads the settings-backed default, so a `/set_model` picked in
-   * the sidebar (or a change made on dsh web's Models page) takes effect on the
-   * next message without touching the running conversation.
-   */
-  const liveSelection = {
-    get current() {
-      return defaultModel.currentSelection();
-    },
-    assembled: void 0,
-  };
-
-  /**
    * Agent pool: one live agent per open session, keyed by session id. This is
    * what lets a turn keep streaming while the sidebar moves to another
    * conversation. `activeId` only records which session the UI is displaying —
@@ -618,7 +605,7 @@ async function run(ctx) {
       meta: { cwd: process.cwd() },
       agentOptions: { provider: selection.provider, model: selection.model },
       setup: (agentCtx) => {
-        installModelSelection(agentCtx, liveSelection);
+        installModelSelection(agentCtx);
       },
     });
     await h.agent.whenIdle();
@@ -645,6 +632,18 @@ async function run(ctx) {
     return activeId === "" ? null : handles.get(activeId) ?? null;
   }
 
+  // Harness owns model selection per Agent. The deployment default only
+  // supplies a route before a conversation exists; it cannot override a
+  // resumed session's recorded request headers.
+  function currentSelection() {
+    return activeHandle()?.agent?.model?.current?.() ?? defaultModel.currentSelection();
+  }
+
+  function currentModelName() {
+    const selection = currentSelection();
+    return `${selection.provider}/${selection.model}`;
+  }
+
   async function sendModels() {
     const models = [];
     if (llm) {
@@ -658,7 +657,7 @@ async function run(ctx) {
         }
       }
     }
-    emit({ t: "models", current: defaultModel.currentSelection(), models });
+    emit({ t: "models", current: currentSelection(), models });
   }
 
   /**
@@ -995,8 +994,6 @@ async function run(ctx) {
   async function openSession(id) {
     const wanted = String(id);
     if (opening) throw new Error("another session switch is already in progress");
-    const selection = defaultModel.currentSelection();
-    const model = `${selection.provider}/${selection.model}`;
 
     // Already pooled: re-select it and replay its IN-MEMORY log, which is
     // complete and includes a turn that is still streaming. No resume, no
@@ -1007,7 +1004,7 @@ async function run(ctx) {
       emit({
         t: "session_opened",
         id: wanted,
-        model,
+        model: currentModelName(),
         running: isRunning(wanted),
         turns: foldHistory(sessionEvents(pooled.agent.session)),
       });
@@ -1022,7 +1019,7 @@ async function run(ctx) {
       emit({
         t: "session_opened",
         id: wanted,
-        model,
+        model: currentModelName(),
         running: isRunning(wanted),
         turns: foldHistory(events),
       });
@@ -1053,7 +1050,7 @@ async function run(ctx) {
         resumeSessionId: wanted,
         agentOptions: { provider: selection.provider, model: selection.model },
         setup: (agentCtx) => {
-          installModelSelection(agentCtx, liveSelection);
+          installModelSelection(agentCtx);
         },
       });
     } catch (err) {
@@ -1107,6 +1104,7 @@ async function run(ctx) {
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
   let ops = 0; // in-flight async control operations (models/sessions/open)
   let quitting = false;
+  let modelChange = Promise.resolve();
 
   /** Keep stdin-EOF shutdown waiting for an async control operation. */
   function track(op) {
@@ -1212,16 +1210,30 @@ async function run(ctx) {
             ),
           );
           return;
-        case "set_model":
+        case "set_model": {
+          const selection = { provider: String(msg.provider ?? ""), model: String(msg.model ?? "") };
+          const target = activeHandle();
+          modelChange = modelChange.catch(() => {}).then(async () => {
+            if (!selection.provider || !selection.model) throw new Error("missing provider or model");
+            if (target) {
+              if (typeof target.agent.model?.select !== "function") {
+                throw new Error("this Harness does not support per-session model selection; update Harness");
+              }
+              target.agent.model.select(selection);
+              await durableFlush();
+            } else {
+              await defaultModel.saveSelection(selection);
+            }
+          });
           track(
-            defaultModel
-              .saveSelection({ provider: String(msg.provider ?? ""), model: String(msg.model ?? "") })
+            modelChange
               .then(() => sendModels())
               .catch((err) =>
                 emit({ t: "error", message: `set_model failed: ${String(err?.message ?? err)}` }),
               ),
           );
           return;
+        }
         case "list_sessions":
           track(
             sendSessions().catch((err) =>
@@ -1337,6 +1349,9 @@ async function run(ctx) {
 
     pending += 1;
     (async () => {
+      // A prompt submitted immediately after a switch must await the saved
+      // route, especially while a blank chat's default is still being written.
+      await modelChange;
       // Lazy session creation / re-resume of an evicted session. A session is
       // minted only on the first real prompt, so "new chat"/sidebar opens
       // never register empty conversations in the shared session store.

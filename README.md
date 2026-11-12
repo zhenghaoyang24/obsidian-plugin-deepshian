@@ -6,7 +6,7 @@ English · [简体中文](README.zh.md)
 
 [Upstream project](https://github.com/zhenghaoyang24/obsidian-plugin-deepshian) · [Patch branch](https://github.com/mzh-nuist/obsidian-plugin-deepshian/tree/codex/fix-harness-output) · [Upstream issues](https://github.com/zhenghaoyang24/obsidian-plugin-deepshian/issues)
 
-> **About this branch:** This is a compatibility patch for DeepShian 1.3.0. It restores replies with newer Harness versions, keeps reasoning separate from answers, and restores history replay. These changes are not included in the upstream 1.3.0 release. The manifest still says `1.3.0`; no new release tag has been published for this branch.
+> **About this branch:** This is a compatibility patch for DeepShian 1.3.0. It restores replies and history with newer Harness versions, separates reasoning from answers, displays complete model names, and fixes provider switching inside existing conversations. These changes are not included in the upstream 1.3.0 release. The manifest still says `1.3.0`; no new release tag has been published for this branch.
 
 ## What this patch fixes
 
@@ -18,6 +18,7 @@ English · [简体中文](README.zh.md)
 | An existing session opens with a title but no conversation. | Read current Session snapshots, with a fallback for older event arrays. |
 | The Think disclosure and its preview distract from the answer. | Hide them by default; enable **Show thinking** whenever wanted. |
 | Long model names are cut off, or a namespaced id displays only as `deepseek`. | Wrap the full name in the menu and trigger, preserve the complete id, and show provider/id details on hover. |
+| The picker shows a new provider, but an existing conversation keeps using its previous route. | Select the model on the active Agent, read its actual selection when reopening history, and wait for queued switches before sending a prompt. |
 
 The missing-output symptom is also reported in [upstream issue #1](https://github.com/zhenghaoyang24/obsidian-plugin-deepshian/issues/1).
 
@@ -27,7 +28,7 @@ The missing-output symptom is also reported in [upstream issue #1](https://githu
 - Type `@` to reference a vault file or folder.
 - Use **Read Only** to inspect material, or **Workspace Write** when you want the agent to make changes.
 - Read streamed answers and tool-call cards; show or hide the separate Think panel.
-- Choose a model available in your DSH installation.
+- Choose a model available in your DSH installation, including switching providers within the same conversation.
 - Open and manage conversations that share storage with dsh web.
 - Use the Chinese or English interface.
 
@@ -100,6 +101,14 @@ The example uses `https://api.commandcode.ai/provider/v1` with OpenAI Chat Compl
 
 The route and model above were checked with a real bridge request and an Obsidian reply. The example itself was structurally checked; vision input and other Command Code models were not tested. A bridge-profile reinstall or refresh can replace manual profile edits, so keep your provider configuration backed up. Changing the YAML does not change an already running bridge's selected model until it reloads.
 
+### Switch providers in an existing conversation
+
+Open the conversation, wait for its current work to finish, and choose the model under the intended **provider** in the model menu. The next request uses that conversation's selection and retains its history. Reopening the conversation restores its saved route; switching it does not change other conversations or the default for new chats.
+
+Before the first message of a blank new chat, choosing a model updates the default used to create it. Changing a default alone does not retarget an existing conversation. A prompt submitted immediately after a model switch waits for that switch to settle.
+
+For example, `commandcode/deepseek/deepseek-v4.1-flash-fast` and `deepseek-account/deepseek-flash` are separate provider routes. If a conversation reports **Insufficient Balance**, check its selected provider and that provider's credits. Switching providers does not transfer credits between accounts. Per-session switching requires the Harness Agent model-selection API; incompatible versions report an update error.
+
 For the DSH adapter and credential-reference format, see the [official pi-ai adapter documentation](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/llm/llm-pi-ai/README.md).
 
 ## Everyday use
@@ -132,6 +141,7 @@ For shared history, use one surface at a time for the same conversation: avoid s
 | Tool cards appear, but no answer | Confirm that `main.js` came from this branch's build. A reported version of 1.3.0 alone cannot distinguish the patch from upstream. Disable and re-enable the plugin after copying files. |
 | DSH cannot start | Check the launcher path and verify that the same DSH installation works on its own. |
 | Authentication, quota, or model errors | Check the configured provider in DSH. This plugin does not replace the provider's login or service requirements. |
+| Switching providers appears ineffective in an old conversation | Install this branch's current build, reload DeepShian, reopen the conversation, and choose the intended provider there. Changing only the deployment default does not update an existing session. |
 | Long thinking text appears | Turn off **Show thinking**. Reasoning mixed into the answer body indicates an older bridge or build; check the installed files. |
 | A saved conversation appears empty | Use the patched bridge and reopen the session. The underlying conversation need not be deleted. |
 | The patch disappears after an update | A community-store update can replace the installed files. Rebuild the patch branch or check whether the upstream update already contains the fix. |
@@ -151,9 +161,11 @@ npm run build
 npm run dev
 ```
 
-The patch was checked with **33 passing tests**, plus lint, TypeScript checks, and a production build. Compatibility tests execute the shipped bridge module with synthetic events and inert SDK imports; they do not call a model or read a real vault. They cover completed-message recovery, reasoning exclusion, stream deduplication, missing suffixes, concurrent sessions, current live-frame routing, and history replay.
+The patch was checked with **38 passing tests**, plus lint, TypeScript checks, and a production build. Compatibility tests execute the shipped bridge module with synthetic events and inert SDK imports; they do not call a model or read a real vault. They cover completed-message recovery, reasoning exclusion, stream deduplication, missing suffixes, concurrent sessions, current live-frame routing, and history replay. Five model-switch tests exercise the actual JSONL handler and prompt path with session-owned model fixtures: switching an active session, keeping other conversations independent, waiting for a saved default, restoring a persisted selection after restart, and ordering rapid switches.
 
 The underlying bridge fixes were also exercised in Obsidian 1.15.0 on Windows with Harness 0.2.2-rc.1: a test reply rendered and a saved conversation displayed its answer. Other platforms and Harness versions have not been manually validated in this work.
+
+A separate live two-turn probe selected the official route locally, switched back to Command Code, and verified a reply recalling the first turn's test token. The persisted log recorded both selections and the Command Code request route. No inference request was sent to the official route during that probe. An existing conversation was also reopened in Obsidian with its saved Command Code selection; its original messages were not resent automatically.
 
 ## Credits and license
 
