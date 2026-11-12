@@ -93,7 +93,7 @@ function emit(obj) {
 
 function textOf(content) {
   if (!Array.isArray(content)) return "";
-  return content.map((b) => (typeof b.text === "string" ? b.text : "")).join("");
+  return content.filter((b) => b?.type === "text").map((b) => (typeof b.text === "string" ? b.text : "")).join("");
 }
 
 function parseArguments(raw) {
@@ -247,19 +247,38 @@ async function adoptVaultWorkspace(doc, vaultCanon, rows, resolve, nowIso) {
  * emitting session, stamped on every event so a sidebar watching another
  * conversation can tell whose turn a line belongs to.
  */
+// Compatibility with Harness 0.2: live chunks use agent/assistant-stream.
+// Keep completed-message fallback per assistant step to avoid duplicate text.
+const streamedTextBySession = new Map();
 function mapEvent(event, sid) {
   const d = event.data;
   const at = sid ? { session: sid } : {};
   switch (event.type) {
+    case "step/start":
+      streamedTextBySession.delete(sid);
+      break;
     case "turn/start":
+      streamedTextBySession.delete(sid);
       emit({ t: "turn_start", ...at });
       break;
     case "assistant/chunk": {
       const c = d?.chunk;
       if (c == null) break;
-      if (c.type === "text-delta") emit({ t: "text", ...at, delta: c.text ?? "" });
+      if (c.type === "text-delta") {
+        const delta = c.text ?? "";
+        streamedTextBySession.set(sid, (streamedTextBySession.get(sid) ?? "") + delta);
+        emit({ t: "text", ...at, delta });
+      }
       else if (c.type === "reasoning-delta") emit({ t: "reasoning", ...at, delta: c.text ?? "" });
       else if (c.type === "usage") emit({ t: "usage", ...at, usage: c.usage });
+      break;
+    }
+    case "assistant/message": {
+      const complete = textOf(d?.message?.content);
+      const streamed = streamedTextBySession.get(sid) ?? "";
+      const missing = complete.startsWith(streamed) ? complete.slice(streamed.length) : (streamed ? "" : complete);
+      if (missing) emit({ t: "text", ...at, delta: missing });
+      streamedTextBySession.delete(sid);
       break;
     }
     case "tool/call":
@@ -289,6 +308,7 @@ function mapEvent(event, sid) {
       break;
     }
     case "turn/end":
+      streamedTextBySession.delete(sid);
       emit({
         t: "turn_end",
         ...at,
@@ -391,6 +411,20 @@ function foldHistory(events) {
   return turns;
 }
 
+/** Subscribe to the transient Assistant feed used by Harness 0.2+. */
+function installStreamTap(ctx, handles) {
+  return ctx.on("agent/assistant-stream", ({ agent, frame }) => {
+    const sid = String(agent?.session?.id ?? "");
+    if (!handles.has(sid) || frame?.type !== "chunk") return;
+    mapEvent({ type: "assistant/chunk", data: { chunk: frame.chunk } }, sid);
+  });
+}
+
+/** Current Session API, with a fallback for older Harness versions. */
+function sessionEvents(session) {
+  return session?.snapshotEvents?.() ?? session?.events ?? [];
+}
+
 async function run(ctx) {
   await ctx.get("loader")?.await();
 
@@ -404,19 +438,6 @@ async function run(ctx) {
   }
   const llm = ctx.get("llm");
   const sessionQuery = ctx.get("sessionQuery");
-
-  /**
-   * Live selection reference handed to installModelSelection: every system-prompt
-   * assembly re-reads the settings-backed default, so a `/set_model` picked in
-   * the sidebar (or a change made on dsh web's Models page) takes effect on the
-   * next message without touching the running conversation.
-   */
-  const liveSelection = {
-    get current() {
-      return defaultModel.currentSelection();
-    },
-    assembled: void 0,
-  };
 
   /**
    * Agent pool: one live agent per open session, keyed by session id. This is
@@ -530,6 +551,9 @@ async function run(ctx) {
     }
   });
 
+  // Harness 0.2 publishes transient frames separately from durable events.
+  const disposeStreamTap = installStreamTap(ctx, handles);
+
   // ---------------------------------------------------------- approvals
   /**
    * The sidebar's approval answerer — the CLI-profile twin of dsh web's
@@ -581,7 +605,7 @@ async function run(ctx) {
       meta: { cwd: process.cwd() },
       agentOptions: { provider: selection.provider, model: selection.model },
       setup: (agentCtx) => {
-        installModelSelection(agentCtx, liveSelection);
+        installModelSelection(agentCtx);
       },
     });
     await h.agent.whenIdle();
@@ -608,6 +632,18 @@ async function run(ctx) {
     return activeId === "" ? null : handles.get(activeId) ?? null;
   }
 
+  // Harness owns model selection per Agent. The deployment default only
+  // supplies a route before a conversation exists; it cannot override a
+  // resumed session's recorded request headers.
+  function currentSelection() {
+    return activeHandle()?.agent?.model?.current?.() ?? defaultModel.currentSelection();
+  }
+
+  function currentModelName() {
+    const selection = currentSelection();
+    return `${selection.provider}/${selection.model}`;
+  }
+
   async function sendModels() {
     const models = [];
     if (llm) {
@@ -621,7 +657,7 @@ async function run(ctx) {
         }
       }
     }
-    emit({ t: "models", current: defaultModel.currentSelection(), models });
+    emit({ t: "models", current: currentSelection(), models });
   }
 
   /**
@@ -958,8 +994,6 @@ async function run(ctx) {
   async function openSession(id) {
     const wanted = String(id);
     if (opening) throw new Error("another session switch is already in progress");
-    const selection = defaultModel.currentSelection();
-    const model = `${selection.provider}/${selection.model}`;
 
     // Already pooled: re-select it and replay its IN-MEMORY log, which is
     // complete and includes a turn that is still streaming. No resume, no
@@ -970,9 +1004,9 @@ async function run(ctx) {
       emit({
         t: "session_opened",
         id: wanted,
-        model,
+        model: currentModelName(),
         running: isRunning(wanted),
-        turns: foldHistory(pooled.agent.session?.events ?? []),
+        turns: foldHistory(sessionEvents(pooled.agent.session)),
       });
       return;
     }
@@ -985,7 +1019,7 @@ async function run(ctx) {
       emit({
         t: "session_opened",
         id: wanted,
-        model,
+        model: currentModelName(),
         running: isRunning(wanted),
         turns: foldHistory(events),
       });
@@ -1016,7 +1050,7 @@ async function run(ctx) {
         resumeSessionId: wanted,
         agentOptions: { provider: selection.provider, model: selection.model },
         setup: (agentCtx) => {
-          installModelSelection(agentCtx, liveSelection);
+          installModelSelection(agentCtx);
         },
       });
     } catch (err) {
@@ -1029,7 +1063,7 @@ async function run(ctx) {
     handles.set(String(id), next);
     if (persistedEvents.length === 0) {
       try {
-        persistedEvents = next.agent.session?.events ?? [];
+        persistedEvents = sessionEvents(next.agent.session);
       } catch {}
     }
     return { handle: next, events: persistedEvents };
@@ -1070,6 +1104,7 @@ async function run(ctx) {
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
   let ops = 0; // in-flight async control operations (models/sessions/open)
   let quitting = false;
+  let modelChange = Promise.resolve();
 
   /** Keep stdin-EOF shutdown waiting for an async control operation. */
   function track(op) {
@@ -1129,6 +1164,7 @@ async function run(ctx) {
         .then(async () => {
           await new Promise((r) => setTimeout(r, 120));
           disposeEventTap?.();
+          disposeStreamTap?.();
           process.exit(0);
         });
       return;
@@ -1147,6 +1183,7 @@ async function run(ctx) {
         .then(async () => {
           await new Promise((r) => setTimeout(r, 120));
           disposeEventTap?.();
+          disposeStreamTap?.();
           process.exit(0);
         });
         }
@@ -1173,16 +1210,30 @@ async function run(ctx) {
             ),
           );
           return;
-        case "set_model":
+        case "set_model": {
+          const selection = { provider: String(msg.provider ?? ""), model: String(msg.model ?? "") };
+          const target = activeHandle();
+          modelChange = modelChange.catch(() => {}).then(async () => {
+            if (!selection.provider || !selection.model) throw new Error("missing provider or model");
+            if (target) {
+              if (typeof target.agent.model?.select !== "function") {
+                throw new Error("this Harness does not support per-session model selection; update Harness");
+              }
+              target.agent.model.select(selection);
+              await durableFlush();
+            } else {
+              await defaultModel.saveSelection(selection);
+            }
+          });
           track(
-            defaultModel
-              .saveSelection({ provider: String(msg.provider ?? ""), model: String(msg.model ?? "") })
+            modelChange
               .then(() => sendModels())
               .catch((err) =>
                 emit({ t: "error", message: `set_model failed: ${String(err?.message ?? err)}` }),
               ),
           );
           return;
+        }
         case "list_sessions":
           track(
             sendSessions().catch((err) =>
@@ -1298,6 +1349,9 @@ async function run(ctx) {
 
     pending += 1;
     (async () => {
+      // A prompt submitted immediately after a switch must await the saved
+      // route, especially while a blank chat's default is still being written.
+      await modelChange;
       // Lazy session creation / re-resume of an evicted session. A session is
       // minted only on the first real prompt, so "new chat"/sidebar opens
       // never register empty conversations in the shared session store.

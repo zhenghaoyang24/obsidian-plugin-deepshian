@@ -509,6 +509,9 @@
 /* -------------------------------------------- disclosure rows (Think/tools)
  * Structure per dsh DisclosureRow/ReasoningRow/GenericCommandCard:
  * [leading icon ⇄ chevron] title · dot · summary; body below when open. */
+.dsh-chat.dshc-hide-reasoning .dshc-reasoning {
+  display: none !important;
+}
 .dshc-disc {
   font-size: var(--font-ui-small);
 }
@@ -1051,15 +1054,19 @@
 
 /* bottom row: mode select left, send right (InputBar._row/_tools/_trailing) */
 .dshc-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   min-width: 0;
   padding: 4px 6px 2px;
 }
 .dshc-rowspacer {
-  flex: 1;
-  min-width: 8px;
+  display: none;
+}
+.dshc-row > .dshc-send {
+  grid-column: 2;
+  grid-row: 1;
 }
 
 /* PermissionSelect trigger pill */
@@ -1221,14 +1228,37 @@
 
 /* model picker menu rows (two-line: model name + provider) */
 .dshc-modelwrap {
-  flex-shrink: 1;
+  position: static;
+  grid-column: 1 / -1;
+  grid-row: 2;
   min-width: 0;
 }
-/* The model dropdown is narrower than the shared menu default and capped so
- * long model names ellipsize without overflowing the sidebar width. */
+/* Anchor the model menu to the whole composer card, not the narrow trigger. */
 .dshc-modelwrap .dshc-menu {
-  min-width: 200px;
-  max-width: min(360px, calc(100% - 32px));
+  left: 0;
+  right: 0;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  box-sizing: border-box;
+}
+.dshc-modelwrap .dshc-mode-trigger {
+  width: 100%;
+  max-width: none;
+  height: auto;
+  min-height: 26px;
+}
+.dshc-modelwrap .dshc-trigger-label {
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  text-align: left;
+}
+.dshc-modelwrap .dshc-menu-item {
+  height: auto;
+  min-height: 44px;
+  white-space: normal;
 }
 .dshc-model-text {
   display: flex;
@@ -1240,18 +1270,16 @@
 .dshc-model-name {
   font-size: 13px;
   line-height: 18px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
   color: var(--dshc-label-primary);
 }
 .dshc-model-provider {
   font-size: 11px;
   line-height: 14px;
   color: var(--dshc-label-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* primary circular button (InputBar._primary) — send ⇄ stop glyph */

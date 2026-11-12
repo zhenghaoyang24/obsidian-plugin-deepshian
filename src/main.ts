@@ -173,6 +173,11 @@ export default class DshBridgePlugin extends Plugin {
     this.view?.relocalize();
   }
 
+  /** Apply the display preference without interrupting an active turn. */
+  onReasoningVisibilityChanged(): void {
+    this.view?.updateReasoningVisibility();
+  }
+
   // ------------------------------------------------------------ settings
   async loadSettings(): Promise<void> {
     const data = (await this.loadData()) as Partial<DshSettings> | null;
